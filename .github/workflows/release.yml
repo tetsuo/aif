@@ -141,6 +141,12 @@ jobs:
           mkdir -p target/release-dist
           COPYFILE_DISABLE=1 tar -czf "target/release-dist/aif-v$VERSION-$TARGET.tar.gz" \
             -C "target/$TARGET/release" aif -C "$GITHUB_WORKSPACE" LICENSE README.md
+      - name: Archive Windows CLI
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p target/release-dist
+          python -m zipfile -c "target/release-dist/aif-v$VERSION-$TARGET.zip" \
+            "target/$TARGET/release/$BINARY" LICENSE README.md
       - name: Verify library package
         if: runner.os == 'Linux'
         run: |
@@ -148,7 +154,6 @@ jobs:
           cargo test --locked --manifest-path "target/package/aif-$VERSION/Cargo.toml"
           cp "target/package/aif-$VERSION.crate" target/release-dist/
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: runner.os != 'Windows'
         with:
           name: release-assets-${{ matrix.target }}
           path: target/release-dist/*
@@ -191,10 +196,11 @@ jobs:
         run: |
           test -f "target/release-dist/aif-v$VERSION-x86_64-unknown-linux-musl.tar.gz"
           test -f "target/release-dist/aif-v$VERSION-aarch64-apple-darwin.tar.gz"
+          test -f "target/release-dist/aif-v$VERSION-x86_64-pc-windows-msvc.zip"
           test -f "target/release-dist/aif-$VERSION.crate"
-          test "$(find target/release-dist -maxdepth 1 -type f | wc -l)" -eq 3
+          test "$(find target/release-dist -maxdepth 1 -type f | wc -l)" -eq 4
           cd target/release-dist
-          sha256sum *.tar.gz *.crate > SHA256SUMS
+          sha256sum *.tar.gz *.zip *.crate > SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -223,7 +229,8 @@ jobs:
             gh release create "$TAG" --verify-tag --draft --generate-notes --title "$TAG" --target "$RELEASE_COMMIT"
           fi
           gh release upload "$TAG" target/release-dist/* --clobber
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
+          # REST release-by-tag lookups exclude draft releases.
+          release_id=$(gh release view "$TAG" --json databaseId --jq '.databaseId')
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false -f make_latest=legacy > /dev/null
       - name: Record result
