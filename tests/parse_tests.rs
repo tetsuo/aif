@@ -1,4 +1,5 @@
 use aip_filter::parse;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -29,115 +30,127 @@ fn parse_txtar(content: &str) -> Vec<(String, String)> {
     files
 }
 
-#[test]
-fn test_parse() {
-    let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/parse");
-    if !test_dir.exists() {
-        eprintln!("Skipping parse tests: testdata/parse not found");
-        return;
+fn verify_fixture(content: &str) -> Result<usize, String> {
+    let sections = parse_txtar(content);
+    if sections.is_empty() {
+        return Err("fixture contains no test cases".into());
     }
-
-    let mut total = 0;
-    let mut passed = 0;
-    let mut failed_tests = Vec::new();
-
-    for entry in fs::read_dir(&test_dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().map(|e| e == "txt").unwrap_or(false) {
-            let content = fs::read_to_string(&path).unwrap();
-            let files = parse_txtar(&content);
-
-            let mut i = 0;
-            while i < files.len() {
-                let (name, data) = &files[i];
-                if !name.ends_with(".test") {
-                    i += 1;
-                    continue;
-                }
-
-                let base = name.strip_suffix(".test").unwrap();
-                total += 1;
-
-                let result = parse(data);
-
-                i += 1;
-                if i >= files.len() {
-                    eprintln!("  {}: missing expected result", base);
-                    continue;
-                }
-
-                let (expected_name, expected_data) = &files[i];
-
-                if expected_name.ends_with(".out") {
-                    match result {
-                        Err(e) => {
-                            failed_tests.push(format!(
-                                "{}:{}: got error '{}', expected success",
-                                path.file_name().unwrap().to_str().unwrap(),
-                                base,
-                                e
-                            ));
-                        }
-                        Ok(expr) => {
-                            let got = match expr {
-                                Some(e) => format!("{}", e),
-                                None => String::new(),
-                            };
-                            let want = expected_data.trim_end_matches('\n');
-                            let got_trimmed = got.trim_end_matches('\n');
-                            if got_trimmed == want {
-                                passed += 1;
-                            } else {
-                                failed_tests.push(format!(
-                                    "{}:{}: output mismatch\n  got:  {:?}\n  want: {:?}",
-                                    path.file_name().unwrap().to_str().unwrap(),
-                                    base,
-                                    got_trimmed,
-                                    want
-                                ));
-                            }
-                        }
-                    }
-                } else if expected_name.ends_with(".err") {
-                    match result {
-                        Ok(_) => {
-                            failed_tests.push(format!(
-                                "{}:{}: got success, expected error '{}'",
-                                path.file_name().unwrap().to_str().unwrap(),
-                                base,
-                                expected_data.trim()
-                            ));
-                        }
-                        Err(e) => {
-                            let want = expected_data.trim();
-                            let got = e.trim();
-                            if got == want || regex_error_prefix_matches(got, want) {
-                                passed += 1;
-                            } else {
-                                failed_tests.push(format!(
-                                    "{}:{}: error mismatch\n  got:  {:?}\n  want: {:?}",
-                                    path.file_name().unwrap().to_str().unwrap(),
-                                    base,
-                                    got,
-                                    want
-                                ));
-                            }
-                        }
-                    }
+    let mut names = HashSet::new();
+    for pair in sections.chunks(2) {
+        let (name, input) = &pair[0];
+        let base = name
+            .strip_suffix(".test")
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| format!("expected a named .test section, found {name}"))?;
+        if !names.insert(base) {
+            return Err(format!("duplicate test case: {base}"));
+        }
+        let (expected_name, expected) = pair
+            .get(1)
+            .ok_or_else(|| format!("{base}: missing expected result"))?;
+        let is_error = if expected_name == &format!("{base}.out") {
+            false
+        } else if expected_name == &format!("{base}.err") {
+            true
+        } else {
+            return Err(format!(
+                "{base}: expected {base}.out or {base}.err, found {expected_name}"
+            ));
+        };
+        match (parse(input), is_error) {
+            (Ok(expr), false) => {
+                let got = expr.map(|expr| expr.to_string()).unwrap_or_default();
+                if got.trim_end_matches('\n') != expected.trim_end_matches('\n') {
+                    return Err(format!(
+                        "{base}: output mismatch\n  got: {got:?}\n  want: {expected:?}"
+                    ));
                 }
             }
+            (Err(error), true) => {
+                let got = error.trim();
+                let want = expected.trim();
+                if got != want && !regex_error_prefix_matches(got, want) {
+                    return Err(format!(
+                        "{base}: error mismatch\n  got: {got:?}\n  want: {want:?}"
+                    ));
+                }
+            }
+            (Err(error), false) => return Err(format!("{base}: expected success, got {error}")),
+            (Ok(_), true) => return Err(format!("{base}: expected an error, got success")),
         }
     }
+    Ok(names.len())
+}
 
-    println!("\nParse tests: {}/{} passed", passed, total);
-    if !failed_tests.is_empty() {
-        println!("\nFailed tests:");
-        for f in &failed_tests {
-            println!("  {}", f);
+fn verify_directory(directory: &Path) -> Result<usize, String> {
+    let mut files = Vec::new();
+    for entry in
+        fs::read_dir(directory).map_err(|error| format!("{}: {error}", directory.display()))?
+    {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension().is_some_and(|extension| extension == "txt") {
+            files.push(path);
         }
-        panic!("{} of {} parse tests failed", failed_tests.len(), total);
     }
+    if files.is_empty() {
+        return Err(format!("{}: no .txt fixtures", directory.display()));
+    }
+    files.sort();
+    let mut total = 0;
+    for path in files {
+        let content =
+            fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        total +=
+            verify_fixture(&content).map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    Ok(total)
+}
+
+#[test]
+fn test_parse() {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/parse");
+    let total = verify_directory(&directory).unwrap();
+    println!("Parse tests: {total}/{total} passed");
+}
+
+#[test]
+fn malformed_fixtures_fail() {
+    for content in [
+        "",
+        "only comments\n",
+        "-- x.test --\nx\n",
+        "-- x.out --\nx\n",
+        "-- x.test --\nx\n-- y.out --\nx\n",
+        "-- x.test --\nx\n-- x.unknown --\nx\n",
+        "-- x.test --\nx\n-- x.out --\nx\n-- x.test --\nx\n-- x.out --\nx\n",
+        "-- x.test --\nx\n-- x.out --\ny\n",
+        "-- x.test --\nx\n-- x.err --\nan error\n",
+    ] {
+        assert!(verify_fixture(content).is_err(), "{content:?}");
+    }
+    assert_eq!(
+        verify_fixture("-- x.test --\nx\n-- x.out --\nx\n").unwrap(),
+        1
+    );
+}
+
+#[test]
+fn missing_and_empty_fixture_directories_fail() {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!("fixture-validation-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    assert!(verify_directory(&directory.join("missing")).is_err());
+    assert!(verify_directory(&directory).is_err());
+    fs::write(directory.join("empty.txt"), "").unwrap();
+    assert!(verify_directory(&directory).is_err());
+    fs::write(
+        directory.join("empty.txt"),
+        "-- x.test --\nx\n-- x.out --\nx\n",
+    )
+    .unwrap();
+    assert_eq!(verify_directory(&directory).unwrap(), 1);
+    fs::remove_dir_all(directory).unwrap();
 }
 
 /// Returns true when the position prefix and "invalid regular expression:" label
