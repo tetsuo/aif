@@ -28,7 +28,7 @@ usage: aip-filter [-p|--print] <expr> [file...]
 * An unquoted boolean field name evaluates that field. A dotted name resolves a field path first and otherwise becomes a global literal. Quote a search term to prevent field lookup, for example `'"active"'` or `'"example.com"'`.
 * String `=` and `!=` ignore ASCII case and support one leading or trailing `*`. The two operators are opposites.
 * String `:` matches words or phrases bounded by whitespace or ASCII punctuation, or a leading/trailing wildcard. Lists match any element; maps match keys. `field:*` tests for a non-default value, including a nonempty list or map.
-* Functions are parsed but not evaluated. Regexes are validated when parsing and recompiled during evaluation. Filter nesting is not bounded; do not accept untrusted filter expressions without external limits.
+* Functions are parsed but not evaluated. Regexes are validated when parsing and recompiled during evaluation. Filters are limited to 64 KiB, 512 non-whitespace tokens, 64 recursive parser calls, and an expression tree of at most 128 levels and 512 nodes. Excessive filters return errors instead of recursing without a bound.
 
 ### Examples
 

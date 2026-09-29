@@ -1,0 +1,60 @@
+use aip_filter::parse;
+use std::process::Command;
+
+#[test]
+fn excessive_filters_report_errors_without_crashing() {
+    let filters = [
+        format!("{}x{}", "(".repeat(4096), ")".repeat(4096)),
+        format!("{}x{}", "(".repeat(100), ")".repeat(100)),
+        format!("{}x", "NOT ".repeat(100)),
+        format!("{}x{}", "f(".repeat(100), ")".repeat(100)),
+        "x ".repeat(300),
+        "x.".repeat(300) + "x",
+        "x AND ".repeat(300) + "x",
+        "x".repeat(65537),
+    ];
+    for filter in filters {
+        let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+            .args(["--print", &filter])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("exceeds"));
+    }
+}
+
+#[test]
+fn parser_limits_work_on_a_normal_thread_stack() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            assert!(parse(&format!("{}x{}", "(".repeat(100), ")".repeat(100))).is_err());
+            assert!(parse(&("x ".repeat(300))).is_err());
+            assert!(parse(&format!("{}x", "NOT ".repeat(100))).is_err());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn ordinary_nested_filters_still_parse() {
+    assert!(
+        parse(&format!("{}x{}", "(".repeat(16), ")".repeat(16)))
+            .unwrap()
+            .is_some()
+    );
+    assert!(parse(&("x AND ".repeat(20) + "x")).unwrap().is_some());
+    assert!(parse(&("x.".repeat(20) + "x = 1")).unwrap().is_some());
+    assert!(
+        parse(&format!("\"{}\"", "x".repeat(65534)))
+            .unwrap()
+            .is_some()
+    );
+}

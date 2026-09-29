@@ -1,12 +1,74 @@
 use super::ast::{BinaryOp, CompareOp, Expr, Position, UnaryOp};
 use super::lex::{Lexer, Token, TokenKind};
 
+pub const MAX_FILTER_BYTES: usize = 64 * 1024;
+pub const MAX_FILTER_TOKENS: usize = 512;
+const MAX_PARSE_DEPTH: usize = 64;
+
+struct Parser {
+    tokens: std::vec::IntoIter<Token>,
+    pushed: Option<Token>,
+    eof: Token,
+    depth: usize,
+}
+
+impl Parser {
+    fn new(filter: &str) -> Result<Self, String> {
+        if filter.len() > MAX_FILTER_BYTES {
+            return Err(format!("filter exceeds {MAX_FILTER_BYTES} bytes"));
+        }
+        let mut lexer = Lexer::new(filter);
+        let mut tokens = Vec::new();
+        let mut count = 0;
+        loop {
+            let token = lexer.next_token();
+            if token.kind == TokenKind::Eof {
+                return Ok(Self {
+                    tokens: tokens.into_iter(),
+                    pushed: None,
+                    eof: token,
+                    depth: 0,
+                });
+            }
+            if token.kind != TokenKind::Wsc {
+                count += 1;
+                if count > MAX_FILTER_TOKENS {
+                    return Err(format!("{}: filter exceeds {MAX_FILTER_TOKENS} tokens", token.pos));
+                }
+            }
+            tokens.push(token);
+        }
+    }
+
+    fn next_token(&mut self) -> Token {
+        self.pushed
+            .take()
+            .or_else(|| self.tokens.next())
+            .unwrap_or_else(|| self.eof.clone())
+    }
+
+    fn push_token(&mut self, token: Token) {
+        assert!(self.pushed.is_none(), "double push_token");
+        self.pushed = Some(token);
+    }
+
+    fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<T, String> {
+        if self.depth >= MAX_PARSE_DEPTH {
+            return Err(format!("filter exceeds parser nesting limit of {MAX_PARSE_DEPTH}"));
+        }
+        self.depth += 1;
+        let result = parse(self);
+        self.depth -= 1;
+        result
+    }
+}
+
 /// Parse a filter expression string into an [`Expr`].
 ///
 /// Returns `Ok(None)` for empty input, `Ok(Some(expr))` on success,
 /// `Err(msg)` on parse error.
 pub fn parse_filter(filter: &str) -> Result<Option<Expr>, String> {
-    let mut lex = Lexer::new(filter);
+    let mut lex = Parser::new(filter)?;
 
     let mut tok = lex.next_token();
     if tok.kind == TokenKind::Wsc {
@@ -27,16 +89,17 @@ pub fn parse_filter(filter: &str) -> Result<Option<Expr>, String> {
         return Err(format!("{}: unexpected tokens after filter expression", tok.pos));
     }
 
+    expr.check_limits()?;
     Ok(Some(expr))
 }
 
 /// expression = sequence, { "AND", sequence } ;
-fn parse_expression(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_expression(lex: &mut Parser) -> Result<Expr, String> {
     parse_junction(lex, TokenKind::And, parse_sequence)
 }
 
 /// sequence = factor, { factor } ;
-fn parse_sequence(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_sequence(lex: &mut Parser) -> Result<Expr, String> {
     let mut factor = parse_factor(lex)?;
 
     loop {
@@ -68,15 +131,15 @@ fn parse_sequence(lex: &mut Lexer) -> Result<Expr, String> {
 }
 
 /// factor = term, { "OR", term } ;
-fn parse_factor(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_factor(lex: &mut Parser) -> Result<Expr, String> {
     parse_junction(lex, TokenKind::Or, parse_term)
 }
 
 /// Parse an AND or OR sequence.
 fn parse_junction(
-    lex: &mut Lexer,
+    lex: &mut Parser,
     kind: TokenKind,
-    parse_element: fn(&mut Lexer) -> Result<Expr, String>,
+    parse_element: fn(&mut Parser) -> Result<Expr, String>,
 ) -> Result<Expr, String> {
     let mut sub = parse_element(lex)?;
 
@@ -117,7 +180,11 @@ fn parse_junction(
 }
 
 /// term = [ "-" | "NOT" ], primitive ;
-fn parse_term(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_term(lex: &mut Parser) -> Result<Expr, String> {
+    lex.nested(parse_term_inner)
+}
+
+fn parse_term_inner(lex: &mut Parser) -> Result<Expr, String> {
     let tok = lex.next_token();
     let is_neg = tok.kind == TokenKind::Minus || tok.kind == TokenKind::Not;
     let neg_pos = tok.pos;
@@ -160,7 +227,7 @@ fn parse_term(lex: &mut Lexer) -> Result<Expr, String> {
 }
 
 /// Parse a primitive (comparison, function call, parenthesized expr, or bare value).
-fn parse_primitive(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_primitive(lex: &mut Parser) -> Result<Expr, String> {
     let mut tok = lex.next_token();
     if tok.kind == TokenKind::Wsc {
         tok = lex.next_token();
@@ -254,7 +321,11 @@ fn func_pos(expr: &Expr) -> Position {
 }
 
 /// Parse a parenthesized expression. We have already consumed the `(`.
-fn parse_parenthesized_expression(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_parenthesized_expression(lex: &mut Parser) -> Result<Expr, String> {
+    lex.nested(parse_parenthesized_inner)
+}
+
+fn parse_parenthesized_inner(lex: &mut Parser) -> Result<Expr, String> {
     let tok = lex.next_token();
     if tok.kind != TokenKind::Wsc {
         lex.push_token(tok);
@@ -301,7 +372,7 @@ fn mark_composite(expr: &mut Expr) {
 }
 
 /// Parse a comparable (name, member, function).
-fn parse_comparable(lex: &mut Lexer, tok: Token) -> Result<Expr, String> {
+fn parse_comparable(lex: &mut Parser, tok: Token) -> Result<Expr, String> {
     let mut saw_white = false;
     let mut ntok = lex.next_token();
     if ntok.kind == TokenKind::Wsc {
@@ -361,7 +432,7 @@ fn parse_comparable(lex: &mut Lexer, tok: Token) -> Result<Expr, String> {
 }
 
 /// Parse member access: `identifier { "." identifier }`.
-fn parse_member(lex: &mut Lexer, tok: &Token, pos: Position) -> Result<Expr, String> {
+fn parse_member(lex: &mut Parser, tok: &Token, pos: Position) -> Result<Expr, String> {
     let mut ret: Expr = Expr::Name {
         name: tok.val.clone(),
         pos: tok.pos,
@@ -395,7 +466,11 @@ fn parse_member(lex: &mut Lexer, tok: &Token, pos: Position) -> Result<Expr, Str
 }
 
 /// Parse a function call. We've consumed the `(`.
-fn parse_function(lex: &mut Lexer, func: Expr) -> Result<Expr, String> {
+fn parse_function(lex: &mut Parser, func: Expr) -> Result<Expr, String> {
+    lex.nested(|lex| parse_function_inner(lex, func))
+}
+
+fn parse_function_inner(lex: &mut Parser, func: Expr) -> Result<Expr, String> {
     let tok = lex.next_token();
     if tok.kind == TokenKind::Rparen {
         return Ok(Expr::Function {
@@ -435,7 +510,7 @@ fn parse_function(lex: &mut Lexer, func: Expr) -> Result<Expr, String> {
 }
 
 /// Parse an argument (comparable, value, or parenthesized expression).
-fn parse_arg(lex: &mut Lexer) -> Result<Expr, String> {
+fn parse_arg(lex: &mut Parser) -> Result<Expr, String> {
     let tok = lex.next_token();
     if tok.kind == TokenKind::Lparen {
         return parse_parenthesized_expression(lex);
@@ -461,6 +536,15 @@ fn keyword_to_text(tok: Token) -> Token {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_push_token() {
+        let mut parser = Parser::new("a b").unwrap();
+        let token = parser.next_token();
+        assert_eq!(token.val, "a");
+        parser.push_token(token);
+        assert_eq!(parser.next_token().val, "a");
+    }
 
     #[test]
     fn test_empty() {

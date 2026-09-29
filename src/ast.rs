@@ -104,3 +104,33 @@ pub enum Expr {
         args: Vec<Expr>,
     },
 }
+
+impl Expr {
+    pub(crate) fn check_limits(&self) -> Result<(), String> {
+        let mut pending = vec![(self, 1)];
+        let mut count = 0;
+        while let Some((expr, depth)) = pending.pop() {
+            count += 1;
+            if depth > 128 || count > 512 {
+                return Err("filter exceeds expression limit (128 levels, 512 nodes)".into());
+            }
+            match expr {
+                Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
+                    pending.push((left, depth + 1));
+                    pending.push((right, depth + 1));
+                }
+                Expr::Unary { expr, .. } => pending.push((expr, depth + 1)),
+                Expr::Member { holder, .. } => pending.push((holder, depth + 1)),
+                Expr::Function { func, args } => {
+                    if args.len() > 512 {
+                        return Err("filter exceeds expression limit (512 nodes)".into());
+                    }
+                    pending.push((func, depth + 1));
+                    pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+                }
+                Expr::Name { .. } => {}
+            }
+        }
+        Ok(())
+    }
+}

@@ -43,7 +43,6 @@ pub(crate) struct Token {
 pub(crate) struct Lexer {
     input: Vec<char>,
     cursor: usize,
-    pushed: Option<Token>,
     prev_dot: bool,
     prev_text: bool,
     next_pos: Position,
@@ -54,7 +53,6 @@ impl Lexer {
         Lexer {
             input: input.chars().collect(),
             cursor: 0,
-            pushed: None,
             prev_dot: false,
             prev_text: false,
             next_pos: Position { line: 1, col: 0 },
@@ -62,10 +60,6 @@ impl Lexer {
     }
 
     pub fn next_token(&mut self) -> Token {
-        if let Some(tok) = self.pushed.take() {
-            return tok;
-        }
-
         let pos = self.next_pos;
         let prev_dot = self.prev_dot;
         let prev_text = self.prev_text;
@@ -198,11 +192,6 @@ impl Lexer {
         }
     }
 
-    pub fn push_token(&mut self, tok: Token) {
-        assert!(self.pushed.is_none(), "double push_token");
-        self.pushed = Some(tok);
-    }
-
     // Helpers.
 
     fn peek(&self) -> Option<char> {
@@ -290,8 +279,7 @@ impl Lexer {
             }
         }
 
-        loop {
-            let Some(rn) = self.peek() else { break };
+        while let Some(rn) = self.peek() {
             if rn == '\\' {
                 self.advance();
                 if !self.text_esc(&mut sb) {
@@ -462,7 +450,7 @@ fn is_white(r: char) -> bool {
 }
 
 fn is_digit(r: char) -> bool {
-    ('0'..='9').contains(&r)
+    r.is_ascii_digit()
 }
 
 fn is_octal_digit(r: char) -> bool {
@@ -562,13 +550,4 @@ mod tests {
         assert_eq!(t.kind, TokenKind::Equals);
     }
 
-    #[test]
-    fn test_push_token() {
-        let mut lex = Lexer::new("a b");
-        let t = lex.next_token();
-        assert_eq!(t.val, "a");
-        lex.push_token(t.clone());
-        let t2 = lex.next_token();
-        assert_eq!(t2.val, "a");
-    }
 }
