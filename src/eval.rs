@@ -1,6 +1,6 @@
 use super::ast::{BinaryOp, CompareOp, Expr, UnaryOp};
 use regex::Regex;
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering};
 
 /// A runtime value used during filter evaluation.
 #[derive(Debug, Clone)]
@@ -33,6 +33,11 @@ impl<'a> Value<'a> {
             Value::StringOwned(s) => Some(s.as_str()),
             _ => None,
         }
+    }
+
+    /// Matches a global literal against this value and any nested values.
+    pub fn matches_global(&self, search: &str) -> bool {
+        value_contains_str(self, search)
     }
 
     /// Returns true if this value is the zero/default for its type.
@@ -68,10 +73,14 @@ impl<'a> Value<'a> {
                 Some(a.to_lowercase().cmp(&b.to_lowercase()))
             }
             // Cross-numeric comparisons
-            (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
-            (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)),
-            (Value::Uint(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
-            (Value::Float(a), Value::Uint(b)) => a.partial_cmp(&(*b as f64)),
+            (Value::Int(a), Value::Float(b)) => compare_integer_float(i128::from(*a), *b),
+            (Value::Float(a), Value::Int(b)) => {
+                compare_integer_float(i128::from(*b), *a).map(Ordering::reverse)
+            }
+            (Value::Uint(a), Value::Float(b)) => compare_integer_float(i128::from(*a), *b),
+            (Value::Float(a), Value::Uint(b)) => {
+                compare_integer_float(i128::from(*b), *a).map(Ordering::reverse)
+            }
             (Value::Int(a), Value::Uint(b)) => {
                 if *a < 0 {
                     Some(Ordering::Less)
@@ -88,6 +97,23 @@ impl<'a> Value<'a> {
             }
             _ => None,
         }
+    }
+}
+
+// The integer is an i64 or u64. Comparing its exact value avoids f64 rounding above 2^53.
+fn compare_integer_float(integer: i128, float: f64) -> Option<Ordering> {
+    if float.is_nan() {
+        return None;
+    }
+    if float < i64::MIN as f64 {
+        return Some(Ordering::Greater);
+    }
+    if float >= u64::MAX as f64 {
+        return Some(Ordering::Less);
+    }
+    match integer.cmp(&(float as i128)) {
+        Ordering::Equal => 0.0_f64.partial_cmp(&float.fract()),
+        order => Some(order),
     }
 }
 
@@ -144,6 +170,13 @@ pub trait Filterable {
     fn all_field_values(&self) -> Vec<Value<'_>> {
         Vec::new()
     }
+
+    /// Matches a bare literal across field values. Override to search without collecting values.
+    fn matches_global(&self, search: &str) -> bool {
+        self.all_field_values()
+            .iter()
+            .any(|value| value.matches_global(search))
+    }
 }
 
 impl Expr {
@@ -171,25 +204,10 @@ impl Expr {
             Expr::Name {
                 name, is_string, ..
             } => {
-                // A bare name/value: global restriction matching.
-                // Check if any field contains or equals the value.
-                if let Some(field_val) = val.field(name) {
-                    // If it's a boolean field referenced by name, return its value
-                    if !*is_string
-                        && let Value::Bool(b) = field_val {
-                            return b;
-                        }
-                    return !field_val.is_zero();
+                if !*is_string && let Some(Value::Bool(b)) = val.field(name) {
+                    return b;
                 }
-
-                // Try matching against all fields
-                let search = name.as_str();
-                for field_val in val.all_field_values() {
-                    if value_contains_str(&field_val, search) {
-                        return true;
-                    }
-                }
-                false
+                val.matches_global(name)
             }
 
             Expr::Member {
@@ -202,7 +220,7 @@ impl Expr {
                         _ => !val.is_zero(),
                     }
                 } else {
-                    false
+                    expr_to_literal_str(self).is_some_and(|literal| val.matches_global(&literal))
                 }
             }
 
@@ -228,14 +246,13 @@ fn eval_comparison<T: Filterable>(
         return false;
     };
 
-    eval_comparison_with_value(op, &left_val, right, val)
+    eval_comparison_with_value(op, &left_val, right)
 }
 
-fn eval_comparison_with_value<T: Filterable>(
+fn eval_comparison_with_value(
     op: CompareOp,
     left_val: &Value<'_>,
     right: &Expr,
-    val: &T,
 ) -> bool {
     // Handle the right side, it could be a composite expression (AND/OR)
     match right {
@@ -244,23 +261,28 @@ fn eval_comparison_with_value<T: Filterable>(
             left: rleft,
             right: rright,
             ..
-        } => {
-            let l = eval_comparison_with_value(op, left_val, rleft, val);
-            let r = eval_comparison_with_value(op, left_val, rright, val);
-            match bin_op {
-                BinaryOp::And => l && r,
-                BinaryOp::Or => l || r,
+        } => match bin_op {
+            BinaryOp::And => {
+                eval_comparison_with_value(op, left_val, rleft)
+                    && eval_comparison_with_value(op, left_val, rright)
             }
-        }
+            BinaryOp::Or => {
+                eval_comparison_with_value(op, left_val, rleft)
+                    || eval_comparison_with_value(op, left_val, rright)
+            }
+        },
         Expr::Unary {
             op: UnaryOp::Minus | UnaryOp::Not,
             expr,
             ..
-        } => !eval_comparison_with_value(op, left_val, expr, val),
+        } => !eval_comparison_with_value(op, left_val, expr),
 
         _ => {
             let right_str = expr_to_literal_str(right);
             let right_str = right_str.as_deref();
+            if op == CompareOp::Has && right_str == Some("*") {
+                return !left_val.is_zero();
+            }
 
             match (&left_val, op) {
                 // Has operator on lists
@@ -300,10 +322,6 @@ fn eval_comparison_with_value<T: Filterable>(
                 // Has on strings; substring/word boundary match
                 (_, CompareOp::Has) => {
                     if let Some(rs) = right_str {
-                        // Wildcard handling
-                        if rs == "*" {
-                            return !left_val.is_zero();
-                        }
                         value_matches_str(left_val, rs, op)
                     } else {
                         false
@@ -344,14 +362,14 @@ fn eval_comparison_with_value<T: Filterable>(
 }
 
 /// Resolve an expression to its value given a filterable object.
-fn resolve_expr_value<'a, T: Filterable>(expr: &Expr, val: &'a T) -> Option<Value<'a>> {
+fn resolve_expr_value<'a, T: Filterable>(expr: &'a Expr, val: &'a T) -> Option<Value<'a>> {
     match expr {
         Expr::Name {
             name, is_string, ..
         } => {
             if *is_string {
                 // A quoted string on the left side of a comparison is just a string literal
-                Some(Value::StringOwned(name.clone()))
+                Some(Value::String(name))
             } else {
                 val.field(name)
             }
@@ -420,9 +438,9 @@ fn resolve_member_value<'a, T: Filterable>(
 }
 
 /// Extract the literal string from an expression (name or member chain as dotted string).
-fn expr_to_literal_str(expr: &Expr) -> Option<String> {
+fn expr_to_literal_str(expr: &Expr) -> Option<Cow<'_, str>> {
     match expr {
-        Expr::Name { name, .. } => Some(name.clone()),
+        Expr::Name { name, .. } => Some(Cow::Borrowed(name)),
         Expr::Member { holder, member, .. } => {
             // a.b on the right side is just "a.b" as a string
             let mut parts = vec![member.as_str()];
@@ -441,7 +459,7 @@ fn expr_to_literal_str(expr: &Expr) -> Option<String> {
                 }
             }
             parts.reverse();
-            Some(parts.join("."))
+            Some(Cow::Owned(parts.join(".")))
         }
         Expr::Function { .. } => None,
         _ => None,
@@ -451,29 +469,21 @@ fn expr_to_literal_str(expr: &Expr) -> Option<String> {
 /// Parse a literal string to match the type of a reference value.
 fn parse_literal_for_value<'a>(reference: &Value<'_>, literal: &'a str) -> Value<'a> {
     match reference {
-        Value::Bool(_) => match literal.to_lowercase().as_str() {
-            "true" | "1" => Value::Bool(true),
-            "false" | "0" => Value::Bool(false),
-            _ => Value::String(literal),
-        },
-        Value::Int(_) => {
+        Value::Bool(_) => {
+            if literal.eq_ignore_ascii_case("true") || literal == "1" {
+                Value::Bool(true)
+            } else if literal.eq_ignore_ascii_case("false") || literal == "0" {
+                Value::Bool(false)
+            } else {
+                Value::String(literal)
+            }
+        }
+        Value::Int(_) | Value::Uint(_) | Value::Float(_) => {
             if let Ok(i) = literal.parse::<i64>() {
                 Value::Int(i)
-            } else if let Ok(f) = literal.parse::<f64>() {
-                Value::Int(f as i64)
-            } else {
-                Value::String(literal)
-            }
-        }
-        Value::Uint(_) => {
-            if let Ok(u) = literal.parse::<u64>() {
+            } else if let Ok(u) = literal.parse::<u64>() {
                 Value::Uint(u)
-            } else {
-                Value::String(literal)
-            }
-        }
-        Value::Float(_) => {
-            if let Ok(f) = literal.parse::<f64>() {
+            } else if let Ok(f) = literal.parse::<f64>() {
                 Value::Float(f)
             } else {
                 Value::String(literal)
@@ -489,42 +499,8 @@ fn value_matches_str(val: &Value<'_>, s: &str, op: CompareOp) -> bool {
     match val {
         Value::String(vs) => string_match(vs, s, op),
         Value::StringOwned(vs) => string_match(vs.as_str(), s, op),
-        Value::Int(i) => {
-            if let Ok(ri) = s.parse::<i64>() {
-                match op {
-                    CompareOp::Equals | CompareOp::Has => *i == ri,
-                    _ => false,
-                }
-            } else {
-                false
-            }
-        }
-        Value::Uint(u) => {
-            if let Ok(ru) = s.parse::<u64>() {
-                match op {
-                    CompareOp::Equals | CompareOp::Has => *u == ru,
-                    _ => false,
-                }
-            } else {
-                false
-            }
-        }
-        Value::Float(f) => {
-            if let Ok(rf) = s.parse::<f64>() {
-                match op {
-                    CompareOp::Equals | CompareOp::Has => (*f - rf).abs() < f64::EPSILON,
-                    _ => false,
-                }
-            } else {
-                false
-            }
-        }
-        Value::Bool(b) => {
-            let sb = matches!(s.to_lowercase().as_str(), "true" | "1");
-            match op {
-                CompareOp::Equals | CompareOp::Has => *b == sb,
-                _ => false,
-            }
+        Value::Int(_) | Value::Uint(_) | Value::Float(_) | Value::Bool(_) => {
+            compare_values(op, val, &parse_literal_for_value(val, s))
         }
         Value::List(items) => items.iter().any(|item| value_matches_str(item, s, op)),
         Value::Map(entries) => entries.iter().any(|(_, v)| value_matches_str(v, s, op)),
@@ -532,87 +508,75 @@ fn value_matches_str(val: &Value<'_>, s: &str, op: CompareOp) -> bool {
     }
 }
 
-/// String matching: case-insensitive equality for `=`, word-boundary match for `:`, wildcard support.
+/// Equality and `:` support a leading or trailing wildcard.
+/// Word boundaries for `:` are whitespace or ASCII punctuation.
 fn string_match(haystack: &str, needle: &str, op: CompareOp) -> bool {
-    match op {
-        CompareOp::Has => {
-            // Wildcard: * prefix
-            if let Some(suffix) = needle.strip_prefix('*') {
-                return haystack.len() >= suffix.len()
-                    && haystack[haystack.len() - suffix.len()..].eq_ignore_ascii_case(suffix);
-            }
-            // Wildcard: * suffix
-            if let Some(prefix) = needle.strip_suffix('*') {
-                return haystack.len() >= prefix.len()
-                    && haystack[..prefix.len()].eq_ignore_ascii_case(prefix);
-            }
-
-            // Word boundary match
-            let hl = haystack.to_lowercase();
-            let nl = needle.to_lowercase();
-            if let Some(idx) = hl.find(&nl) {
-                let is_boundary = |b: u8| -> bool {
-                    b < 0x80 && !b.is_ascii_alphanumeric()
-                };
-                let start_ok = idx == 0 || is_boundary(haystack.as_bytes()[idx - 1]);
-                let end_ok = idx + nl.len() >= haystack.len()
-                    || is_boundary(haystack.as_bytes()[idx + nl.len()]);
-                if start_ok && end_ok {
-                    return true;
-                }
-            }
-
-            // Also check individual words
-            let words = split_string(haystack);
-            if words.len() > 1 {
-                for word in &words {
-                    if string_match(word, needle, CompareOp::Has) {
-                        return true;
-                    }
-                }
-            }
-
-            false
+    if op == CompareOp::NotEquals {
+        return !string_match(haystack, needle, CompareOp::Equals);
+    }
+    if matches!(op, CompareOp::Equals | CompareOp::Has) {
+        if let Some(suffix) = needle.strip_prefix('*') {
+            return haystack.len()
+                .checked_sub(suffix.len())
+                .and_then(|start| haystack.get(start..))
+                .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix));
         }
-        CompareOp::Equals => {
-            // Wildcard: * prefix
-            if let Some(suffix) = needle.strip_prefix('*') {
-                return haystack.len() >= suffix.len()
-                    && haystack[haystack.len() - suffix.len()..].eq_ignore_ascii_case(suffix);
-            }
-            // Wildcard: * suffix
-            if let Some(prefix) = needle.strip_suffix('*') {
-                return haystack.len() >= prefix.len()
-                    && haystack[..prefix.len()].eq_ignore_ascii_case(prefix);
-            }
-            haystack.eq_ignore_ascii_case(needle)
-        }
-        CompareOp::NotEquals => !haystack.eq_ignore_ascii_case(needle),
-        _ => {
-            // For ordering comparisons on strings, use case-sensitive compare
-            let ord = haystack.cmp(needle);
-            match op {
-                CompareOp::LessThan => ord == Ordering::Less,
-                CompareOp::LessThanEquals => ord != Ordering::Greater,
-                CompareOp::GreaterThan => ord == Ordering::Greater,
-                CompareOp::GreaterThanEquals => ord != Ordering::Less,
-                _ => false,
-            }
+        if let Some(prefix) = needle.strip_suffix('*') {
+            return haystack.get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix));
         }
     }
+    match op {
+        CompareOp::Equals => haystack.eq_ignore_ascii_case(needle),
+        CompareOp::Has => {
+            let haystack = lowercase(haystack);
+            let needle = lowercase(needle);
+            if needle.is_empty() {
+                return true;
+            }
+            let boundary = |c: char| {
+                c.is_whitespace() || (c.is_ascii() && !c.is_ascii_alphanumeric())
+            };
+            let mut offset = 0;
+            while let Some(index) = haystack[offset..].find(needle.as_ref()) {
+                let start = offset + index;
+                let end = start + needle.len();
+                if haystack[..start].chars().next_back().is_none_or(boundary)
+                    && haystack[end..].chars().next().is_none_or(boundary)
+                {
+                    return true;
+                }
+                offset = start + haystack[start..].chars().next().unwrap().len_utf8();
+            }
+            false
+        }
+        _ => compare_values(op, &Value::String(haystack), &Value::String(needle)),
+    }
+}
+
+fn lowercase(s: &str) -> Cow<'_, str> {
+    if s.is_ascii() && !s.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(s.to_lowercase())
+    }
+}
+
+fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    lowercase(haystack).contains(lowercase(needle).as_ref())
 }
 
 /// Check if a value contains a string (for global restriction matching).
 fn value_contains_str(val: &Value<'_>, search: &str) -> bool {
     match val {
-        Value::String(s) => s.to_lowercase().contains(&search.to_lowercase()),
-        Value::StringOwned(s) => s.to_lowercase().contains(&search.to_lowercase()),
+        Value::String(s) => contains_ignore_case(s, search),
+        Value::StringOwned(s) => contains_ignore_case(s, search),
         Value::Int(i) => i.to_string() == search,
         Value::Uint(u) => u.to_string() == search,
         Value::Float(f) => f.to_string() == search,
         Value::Bool(b) => {
             let bs = if *b { "true" } else { "false" };
-            bs == search.to_lowercase()
+            bs.eq_ignore_ascii_case(search)
         }
         Value::List(items) => items.iter().any(|item| value_contains_str(item, search)),
         Value::Map(entries) => entries.iter().any(|(_, v)| value_contains_str(v, search)),
@@ -631,7 +595,7 @@ fn compare_values(op: CompareOp, left: &Value<'_>, right: &Value<'_>) -> bool {
         }
         CompareOp::NotEquals => {
             if let (Some(ls), Some(rs)) = (left.as_str(), right.as_str()) {
-                return !ls.eq_ignore_ascii_case(rs);
+                return string_match(ls, rs, CompareOp::NotEquals);
             }
             left.compare(right) != Some(Ordering::Equal)
         }
@@ -650,45 +614,6 @@ fn compare_values(op: CompareOp, left: &Value<'_>, right: &Value<'_>) -> bool {
             false
         }
     }
-}
-
-/// Split a string into words.
-fn split_string(s: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut start = None;
-
-    for (i, c) in s.char_indices() {
-        if c.is_whitespace() {
-            if let Some(s_idx) = start {
-                result.push(&s[s_idx..i]);
-                start = None;
-            }
-        } else if is_text_start_char(c) {
-            if start.is_none() {
-                start = Some(i);
-            }
-        } else {
-            if let Some(s_idx) = start {
-                result.push(&s[s_idx..i]);
-                start = None;
-            }
-            // Single char becomes its own word
-            let end = i + c.len_utf8();
-            result.push(&s[i..end]);
-        }
-    }
-
-    if let Some(s_idx) = start {
-        result.push(&s[s_idx..]);
-    }
-
-    result
-}
-
-fn is_text_start_char(r: char) -> bool {
-    matches!(r,
-        '#'..='\'' | '*' | '/' | ';' | '?' | '@' | 'A'..='Z' | '[' | ']' | '^'..='}' | '\\'
-    ) || ('\u{00a1}'..='\u{0effff}').contains(&r)
 }
 
 #[cfg(test)]

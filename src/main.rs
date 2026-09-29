@@ -25,7 +25,19 @@ impl<'j> Filterable for JsonRecord<'j> {
     fn all_field_values(&self) -> Vec<Value<'_>> {
         match self.0 {
             Json::Object(map) => map.values().filter_map(json_to_value).collect(),
-            _ => vec![],
+            _ => json_to_value(self.0).into_iter().collect(),
+        }
+    }
+
+    fn matches_global(&self, search: &str) -> bool {
+        match self.0 {
+            Json::Object(map) => map
+                .values()
+                .any(|value| JsonRecord(value).matches_global(search)),
+            Json::Array(items) => items
+                .iter()
+                .any(|value| JsonRecord(value).matches_global(search)),
+            _ => json_to_value(self.0).is_some_and(|value| value.matches_global(search)),
         }
     }
 }
@@ -43,19 +55,29 @@ fn json_to_value(v: &Json) -> Option<Value<'_>> {
         Json::Array(arr) => Some(Value::List(
             arr.iter().filter_map(json_to_value).collect(),
         )),
-        // Nested objects are accessible via field_path; skip at top level.
-        Json::Object(_) => None,
+        Json::Object(map) => Some(Value::Map(
+            map.iter()
+                .filter_map(|(key, value)| {
+                    json_to_value(value).map(|value| (key.as_str(), value))
+                })
+                .collect(),
+        )),
     }
 }
 
 fn filter_lines(
-    expr: &Expr,
+    expr: Option<&Expr>,
     mut reader: impl BufRead,
     out: &mut impl Write,
     source: &str,
-) -> io::Result<()> {
+) -> io::Result<bool> {
+    let Some(expr) = expr else {
+        io::copy(&mut reader, out)?;
+        return Ok(true);
+    };
     let mut line_buffer = String::with_capacity(128);
     let mut lineno = 0;
+    let mut valid = true;
 
     while reader.read_line(&mut line_buffer)? > 0 {
         lineno += 1;
@@ -71,6 +93,7 @@ fn filter_lines(
                 }
                 Err(e) => {
                     eprintln!("{}:{}: invalid JSON: {}", source, lineno, e);
+                    valid = false;
                 }
             }
         }
@@ -80,7 +103,7 @@ fn filter_lines(
         line_buffer.clear();
     }
 
-    Ok(())
+    Ok(valid)
 }
 
 fn usage(program: &str) -> ! {
@@ -106,50 +129,40 @@ fn main() {
 
     let raw_expr = args.remove(0);
     let expr = match parse(&raw_expr) {
-        Ok(Some(e)) => e,
-        Ok(None) => {
-            // Empty expression matches everything; just cat the input.
-            let stdin = io::stdin();
-            let mut out = BufWriter::new(io::stdout().lock());
-            for line in stdin.lock().lines() {
-                writeln!(out, "{}", line.unwrap_or_default()).ok();
-            }
-            return;
-        }
+        Ok(expr) => expr,
         Err(e) => {
             eprintln!("{program}: {e}");
             process::exit(1);
         }
     };
 
-    if print_only {
-        println!("{}", expr);
-        return;
-    }
-
     let mut out = BufWriter::new(io::stdout().lock());
-
-    if args.is_empty() {
-        // Read from stdin.
-        let stdin = io::stdin();
-        if let Err(e) = filter_lines(&expr, stdin.lock(), &mut out, "<stdin>") {
+    let result = (|| -> io::Result<bool> {
+        if print_only {
+            if let Some(expr) = &expr {
+                writeln!(out, "{expr}")?;
+            }
+            return Ok(true);
+        }
+        if args.is_empty() {
+            return filter_lines(expr.as_ref(), io::stdin().lock(), &mut out, "<stdin>");
+        }
+        let mut valid = true;
+        for path in &args {
+            let file = File::open(Path::new(path))
+                .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
+            valid &= filter_lines(expr.as_ref(), BufReader::new(file), &mut out, path)
+                .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
+        }
+        Ok(valid)
+    })();
+    let flushed = out.flush();
+    match result.and_then(|valid| flushed.map(|()| valid)) {
+        Ok(true) => {}
+        Ok(false) => process::exit(1),
+        Err(e) => {
             eprintln!("{program}: {e}");
             process::exit(1);
-        }
-    } else {
-        for path in &args {
-            let source = path.as_str();
-            let file = match File::open(Path::new(path)) {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("{program}: {path}: {e}");
-                    process::exit(1);
-                }
-            };
-            if let Err(e) = filter_lines(&expr, BufReader::new(file), &mut out, source) {
-                eprintln!("{program}: {path}: {e}");
-                process::exit(1);
-            }
         }
     }
 }

@@ -18,6 +18,17 @@ usage: aip-filter [-p|--print] <expr> [file...]
 
 * `--print` prints the parsed expression instead of evaluating it.
 * If no files are given, reads from stdin.
+* Input is newline-delimited JSON, with one value per line. Matching lines are preserved.
+* An empty filter copies the selected input unchanged; `--print` with an empty filter prints nothing.
+* Invalid JSON lines are reported and skipped. Any invalid JSON or input/output error causes a nonzero exit status.
+
+### Matching rules
+
+* Bare literals search values recursively, including nested objects and arrays, but not object keys. String searches are case-insensitive substrings.
+* An unquoted boolean field name evaluates that field. A dotted name resolves a field path first and otherwise becomes a global literal. Quote a search term to prevent field lookup, for example `'"active"'` or `'"example.com"'`.
+* String `=` and `!=` ignore ASCII case and support one leading or trailing `*`. The two operators are opposites.
+* String `:` matches words or phrases bounded by whitespace or ASCII punctuation, or a leading/trailing wildcard. Lists match any element; maps match keys. `field:*` tests for a non-default value, including a nonempty list or map.
+* Functions are parsed but not evaluated. Regexes are validated when parsing and recompiled during evaluation. Filter nesting is not bounded; do not accept untrusted filter expressions without external limits.
 
 ### Examples
 
@@ -40,6 +51,8 @@ echo '{"user": {"settings": {"theme": "dark"}}}' | \
 ## API
 
 Implement `Filterable` for your type, then call `Expr::evaluate`:
+
+Bare-literal matching also requires overriding `all_field_values` or `matches_global`; the default searches no values. Override `matches_global` to search borrowed data without building a list of values. `Value::matches_global` provides recursive matching for individual values.
 
 ```rust
 use aip_filter::{parse, Value, Filterable};
