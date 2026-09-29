@@ -1,4 +1,4 @@
-use aip_filter::{Filterable, Value, parse};
+use aif::{Filterable, Value, parse};
 use serde_json::json;
 
 fn matches(record: &impl Filterable, text: &str) -> bool {

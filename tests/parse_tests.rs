@@ -1,4 +1,4 @@
-use aip_filter::parse;
+use aif::parse;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;

@@ -1,4 +1,4 @@
-use aip_filter::{CompiledFilter, parse};
+use aif::{CompiledFilter, parse};
 use serde_json::Value as Json;
 use std::{
     fs::File,
@@ -116,7 +116,7 @@ fn main() {
                 );
             }
             "-V" | "--version" => {
-                return print_info(&program, concat!("aip-filter ", env!("CARGO_PKG_VERSION")));
+                return print_info(&program, concat!("aif ", env!("CARGO_PKG_VERSION")));
             }
             _ if arg.starts_with("--") => {
                 eprintln!("{program}: unknown option: {arg}; use -- before a literal expression");

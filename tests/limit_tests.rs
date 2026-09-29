@@ -1,4 +1,4 @@
-use aip_filter::parse;
+use aif::parse;
 use std::process::Command;
 
 #[test]
@@ -14,7 +14,7 @@ fn excessive_filters_report_errors_without_crashing() {
         "x".repeat(65537),
     ];
     for filter in filters {
-        let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+        let output = Command::new(env!("CARGO_BIN_EXE_aif"))
             .args(["--print", &filter])
             .output()
             .unwrap();

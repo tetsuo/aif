@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aip_filter"
+name = "aif"
 version = "0.1.0"
 dependencies = [
  "regex",

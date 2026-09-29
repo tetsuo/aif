@@ -119,7 +119,7 @@ fn compare_integer_float(integer: i128, float: f64) -> Option<Ordering> {
 /// # Example
 ///
 /// ```rust
-/// use aip_filter::{Value, Filterable};
+/// use aif::{Value, Filterable};
 ///
 /// struct Issue {
 ///     state: String,

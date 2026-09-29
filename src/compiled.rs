@@ -6,7 +6,7 @@ use std::borrow::Cow;
 /// A validated filter with reusable regexes, literals, and field paths.
 ///
 /// ```
-/// use aip_filter::parse;
+/// use aif::parse;
 /// use serde_json::json;
 ///
 /// let expr = parse(r#"state =~ "^op" AND priority < 6"#).unwrap().unwrap();

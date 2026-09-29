@@ -1,4 +1,4 @@
-use aip_filter::{Filterable, Value, parse};
+use aif::{Filterable, Value, parse};
 
 struct Record<'a> {
     value: Value<'a>,

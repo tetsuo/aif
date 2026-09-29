@@ -50,8 +50,8 @@ def set_version(version):
     manifest = Path("Cargo.toml")
     text = manifest.read_text()
     package = tomllib.loads(text)["package"]
-    if package["name"] != "aip_filter":
-        raise ValueError("expected the aip_filter package")
+    if package["name"] != "aif":
+        raise ValueError("expected the aif package")
     current = package["version"]
     if version_tuple(current) > version_tuple(version):
         raise ValueError(f"manifest version {current} exceeds the planned release {version}")
@@ -64,7 +64,7 @@ def set_version(version):
     if count != 1:
         raise ValueError("expected one explicit package version")
     expected_lock = copy.deepcopy(tomllib.loads(Path("Cargo.lock").read_text()))
-    packages = [p for p in expected_lock["package"] if p["name"] == "aip_filter" and "source" not in p]
+    packages = [p for p in expected_lock["package"] if p["name"] == "aif" and "source" not in p]
     if len(packages) != 1 or packages[0]["version"] != current:
         raise ValueError("manifest and lockfile versions must agree")
     packages[0]["version"] = version
