@@ -4,10 +4,11 @@ Parses and evaluates an [AIP-160](https://google.aip.dev/160)-style filter langu
 
 ## Install
 
-Rust 1.88 or newer is required. Clone the repository and install it with Cargo:
+Install [Rust](https://rustup.rs/), then run this from a repository checkout:
 
 ```bash
-cargo install --path . --locked
+rustup update stable
+cargo +stable install --path . --locked
 ```
 
 ## CLI usage
@@ -57,6 +58,33 @@ let filter = expr.compile().unwrap();
 let record = json!({"state": "open", "priority": 5});
 
 assert!(filter.evaluate(&record));
+```
+
+For a custom type, expose its fields through `Filterable`:
+
+```rust
+use aif::{Filterable, Value, parse};
+
+struct Issue {
+    state: String,
+    priority: i64,
+}
+
+impl Filterable for Issue {
+    fn field(&self, name: &str) -> Option<Value<'_>> {
+        match name {
+            "state" => Some(Value::String(&self.state)),
+            "priority" => Some(Value::Int(self.priority)),
+            _ => None,
+        }
+    }
+}
+
+let expr = parse("state = open AND priority > 3").unwrap().unwrap();
+let filter = expr.compile().unwrap();
+let issue = Issue { state: "open".into(), priority: 5 };
+
+assert!(filter.evaluate(&issue));
 ```
 
 ## License
