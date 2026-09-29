@@ -2,6 +2,10 @@ use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
 fn run(expr: &str, input: &str, args: &[&str]) -> Output {
+    run_bytes(expr, input.as_bytes(), args)
+}
+
+fn run_bytes(expr: &str, input: &[u8], args: &[&str]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
         .args(args)
         .arg(expr)
@@ -10,12 +14,7 @@ fn run(expr: &str, input: &str, args: &[&str]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.as_bytes())
-        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
     child.wait_with_output().unwrap()
 }
 
@@ -161,6 +160,83 @@ fn invalid_json_is_reported_and_returns_failure() {
             .unwrap()
             .contains("<stdin>:1: invalid JSON")
     );
+}
+
+#[test]
+fn record_limits_preserve_boundaries_and_continue_after_errors() {
+    let record = "\"match\"\n";
+    let limit = record.len().to_string();
+    let args = ["--max-record-bytes", limit.as_str()];
+    let output = run("match", &(record.repeat(2)), &args);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, record.repeat(2).as_bytes());
+
+    for oversized in ["\"matchx\"\n", "\"a much longer match\"\n"] {
+        let output = run("match", &format!("{oversized}{record}"), &args);
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.stdout, record.as_bytes());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("<stdin>:1: record exceeds"));
+    }
+    let output = run("match", "\"an unterminated match", &args);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+
+    let output = run("match", "\"match\"", &["--max-record-bytes", "7"]);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"\"match\"");
+    let output = run("match", "\"match\"\r\n", &["--max-record-bytes", "9"]);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"\"match\"\r\n");
+}
+
+#[test]
+fn default_record_limit_is_enforced() {
+    let input = "x".repeat(8 * 1024 * 1024) + "\n\"match\"\n";
+    let output = run("match", &input, &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"\"match\"\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("record exceeds 8388608 bytes"));
+}
+
+#[test]
+fn invalid_record_limit_arguments_fail() {
+    for limit in ["0", "-1", "invalid", "18446744073709551615"] {
+        let output = run("match", "", &["--max-record-bytes", limit]);
+        assert_eq!(output.status.code(), Some(2));
+    }
+}
+
+#[test]
+fn invalid_utf8_is_reported_without_losing_later_records() {
+    let output = run_bytes("match", b"\"\xff\"\n\"match\"\n", &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"\"match\"\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("<stdin>:1: invalid JSON"));
+    let output = run_bytes("", b"\xff\n", &["--max-record-bytes", "1"]);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"\xff\n");
+}
+
+#[test]
+fn filtering_multiple_files_preserves_successful_output() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!("cli-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.jsonl");
+    let second = dir.join("second.jsonl");
+    std::fs::write(&first, b"\"match first\"\n").unwrap();
+    std::fs::write(&second, b"invalid\n\"match second\"\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+        .arg("match")
+        .arg(&first)
+        .arg(&second)
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"\"match first\"\n\"match second\"\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("second.jsonl:1: invalid JSON"));
 }
 
 #[cfg(unix)]
