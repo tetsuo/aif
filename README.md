@@ -139,3 +139,7 @@ fn main() {
     assert!(filter.evaluate(&issue));
 }
 ```
+
+## License
+
+Licensed under the [MIT License](LICENSE).
