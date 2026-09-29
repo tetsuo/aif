@@ -2,6 +2,13 @@
 name = "aip_filter"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "AIP-160-style filtering for Rust values and newline-delimited JSON"
+repository = "https://github.com/tetsuo/aip-filter"
+documentation = "https://docs.rs/aip_filter"
+readme = "README.md"
+keywords = ["aip-160", "filter", "json", "cli"]
+categories = ["command-line-utilities", "parser-implementations"]
 
 [dependencies]
 regex = "1"

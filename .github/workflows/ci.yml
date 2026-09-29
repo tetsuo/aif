@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Rust ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: ["1.88.0", stable]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup toolchain install ${{ matrix.rust }} --profile minimal
+      - name: Test default dependencies
+        run: cargo +${{ matrix.rust }} test --locked
+      - name: Test arbitrary-precision JSON compatibility
+        run: cargo +${{ matrix.rust }} test --locked --features serde_json/arbitrary_precision
+      - name: Test release build
+        run: cargo +${{ matrix.rust }} test --release --locked
+
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Rust tools
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Check formatting
+        run: cargo +stable fmt --all -- --check
+      - name: Check lints
+        run: cargo +stable clippy --all-targets --locked -- -D warnings
+      - name: Check feature compatibility lints
+        run: cargo +stable clippy --all-targets --locked --features serde_json/arbitrary_precision -- -D warnings
+      - name: Verify package
+        run: cargo +stable package --locked
+      - name: Test packaged crate
+        shell: bash
+        run: |
+          package=$(cargo +stable metadata --no-deps --format-version 1 | python3 -c 'import json, sys; p = json.load(sys.stdin)["packages"][0]; print(p["name"] + "-" + p["version"])')
+          cargo +stable test --locked --manifest-path "target/package/$package/Cargo.toml"

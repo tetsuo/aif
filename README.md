@@ -1,13 +1,13 @@
 # aip-filter
 
-Parses and evaluates [AIP-160](https://google.aip.dev/160) filter expressions.
+Parses and evaluates an [AIP-160](https://google.aip.dev/160)-style filter language for JSON and Rust values.
 
 ## Install
 
-Clone the repository and install it with Cargo:
+Rust 1.88 or newer is required. Clone the repository and install it with Cargo:
 
 ```bash
-cargo install --path .
+cargo install --path . --locked
 ```
 
 ## CLI usage
@@ -39,6 +39,10 @@ usage: aip-filter [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
 * The CLI compiles filters before reading records. Regexes, numeric literals, and field paths are reused across records. Filters can contain at most 32 regexes; each regex has a 1 MiB compiled-size limit and a 256 KiB DFA cache limit.
 * Filters are limited to 64 KiB, 512 non-whitespace tokens, 64 recursive parser calls, and an expression tree of at most 128 levels and 512 nodes. Excessive filters return errors instead of recursing without a bound.
 
+### Compatibility
+
+This is a schema-free evaluator, not a complete implementation of a typed AIP-160 API. Missing fields are non-matches, and operand types are determined from each record. There is no schema validation, timestamp or duration type, or function registry. Regex operators, quoted left-hand literals, boolean field shorthand, and list equality are extensions. The matching rules above define the supported behavior.
+
 ### Examples
 
 ```bash
@@ -56,6 +60,19 @@ echo '{"tags": ["stable", "beta"]}' | aip-filter "tags:beta"
 echo '{"user": {"settings": {"theme": "dark"}}}' | \
   aip-filter "user.settings.theme = dark"
 ```
+
+## Development and release checks
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+cargo test --locked --features serde_json/arbitrary_precision
+cargo test --release --locked
+cargo package --locked
+```
+
+CI checks Rust 1.88 and stable Rust on Linux, macOS, and Windows. The quality job also checks formatting, linting, and the packaged crate. Do not tag or publish until the hosted CI checks are complete.
 
 ## Performance
 
