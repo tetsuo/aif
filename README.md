@@ -52,6 +52,25 @@ echo '{"user": {"settings": {"theme": "dark"}}}' | \
   aip-filter "user.settings.theme = dark"
 ```
 
+## Performance
+
+Release builds optimize for speed rather than minimum executable size. The evaluator reuses compiled regexes and literals, borrows JSON collections, and searches overlapping phrases in linear time. JSON parsing still allocates memory for each record.
+
+To compare two release binaries, use Python 3:
+
+```bash
+python3 bench/benchmark.py ./target/baseline ./target/release/aip-filter \
+  --records 100000 --runs 5
+```
+
+The benchmark generates JSON lines under `target/benchmarks`, checks that both binaries produce identical output, and reports median elapsed times for seven workloads. It alternates execution order and discards output during timing. Results depend on the machine and data.
+
+For a smaller binary, Cargo also supports a size-oriented build without changing the configuration:
+
+```bash
+CARGO_PROFILE_RELEASE_OPT_LEVEL=z cargo build --release --locked
+```
+
 ## API
 
 Implement `Filterable` for your type, compile the expression once with `Expr::compile`, and reuse `CompiledFilter::evaluate`. Compilation returns errors for unsupported expressions before any records are read. `serde_json::Value` implements `Filterable` directly and borrows arrays and objects without copying them.
