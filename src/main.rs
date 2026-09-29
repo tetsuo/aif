@@ -9,15 +9,31 @@ use std::{
 
 const DEFAULT_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 
+struct RecordOutput<W> {
+    writer: W,
+    needs_separator: bool,
+}
+
+impl<W: Write> RecordOutput<W> {
+    fn write_record(&mut self, record: &[u8]) -> io::Result<()> {
+        if self.needs_separator {
+            self.writer.write_all(b"\n")?;
+        }
+        self.writer.write_all(record)?;
+        self.needs_separator = !record.ends_with(b"\n");
+        Ok(())
+    }
+}
+
 fn filter_lines(
     expr: Option<&CompiledFilter<'_>>,
     mut reader: impl BufRead,
-    out: &mut impl Write,
+    out: &mut RecordOutput<impl Write>,
     source: &str,
     max_record_bytes: usize,
 ) -> io::Result<bool> {
     let Some(expr) = expr else {
-        io::copy(&mut reader, out)?;
+        io::copy(&mut reader, &mut out.writer)?;
         return Ok(true);
     };
     let mut line_buffer = Vec::with_capacity(128);
@@ -38,7 +54,7 @@ fn filter_lines(
             match serde_json::from_slice::<Json>(&line_buffer) {
                 Ok(json) => {
                     if expr.evaluate(&json) {
-                        out.write_all(&line_buffer)?;
+                        out.write_record(&line_buffer)?;
                     }
                 }
                 Err(e) => {
@@ -97,14 +113,15 @@ fn main() {
         }
         let filter = expr.as_ref().map(|expr| expr.compile()).transpose()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let mut records = RecordOutput { writer: &mut out, needs_separator: false };
         if paths.peek().is_none() {
-            return filter_lines(filter.as_ref(), io::stdin().lock(), &mut out, "<stdin>", max_record_bytes);
+            return filter_lines(filter.as_ref(), io::stdin().lock(), &mut records, "<stdin>", max_record_bytes);
         }
         let mut valid = true;
         for path in paths {
             let file = File::open(Path::new(&path))
                 .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
-            valid &= filter_lines(filter.as_ref(), BufReader::new(file), &mut out, &path, max_record_bytes)
+            valid &= filter_lines(filter.as_ref(), BufReader::new(file), &mut records, &path, max_record_bytes)
                 .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
         }
         Ok(valid)

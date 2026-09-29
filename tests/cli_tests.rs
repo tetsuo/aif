@@ -239,6 +239,48 @@ fn filtering_multiple_files_preserves_successful_output() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("second.jsonl:1: invalid JSON"));
 }
 
+#[test]
+fn multiple_files_keep_record_boundaries_without_forcing_a_final_newline() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!("cli-boundaries-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.jsonl");
+    let middle = dir.join("middle.jsonl");
+    let last = dir.join("last.jsonl");
+    std::fs::write(&middle, b"\n\"unrelated\"\n").unwrap();
+    for ending in ["", "\n", "\r\n"] {
+        std::fs::write(&first, format!("\"match first\"{ending}")).unwrap();
+        std::fs::write(&last, b"\"match last\"").unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+            .arg("match")
+            .args([&first, &middle, &last])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let separator = if ending.is_empty() { "\n" } else { ending };
+        assert_eq!(
+            output.stdout,
+            format!("\"match first\"{separator}\"match last\"").as_bytes()
+        );
+        let values: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&output.stdout)
+            .into_iter()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(values.len(), 2);
+    }
+    std::fs::write(&first, b"raw").unwrap();
+    std::fs::write(&last, b"bytes").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+        .arg("")
+        .args([&first, &last])
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"rawbytes");
+}
+
 #[cfg(unix)]
 #[test]
 fn output_flush_errors_are_reported() {

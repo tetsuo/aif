@@ -18,7 +18,7 @@ usage: aip-filter [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
 
 * `--print` prints the parsed expression instead of evaluating it.
 * If no files are given, reads from stdin.
-* Input is newline-delimited JSON, with one value per line. Matching lines are preserved.
+* Input is newline-delimited JSON, with one value per line. Matching lines are preserved, with a newline inserted between records when a preceding input file has no trailing newline. A final unterminated record is otherwise left unchanged.
 * An empty filter copies the selected input unchanged; `--print` with an empty filter prints nothing.
 * Invalid JSON lines are reported and skipped. Any invalid JSON or input/output error causes a nonzero exit status.
 * Records are limited to 8 MiB by default, including the newline. `--max-record-bytes N` sets a positive byte limit. Oversized records are reported and skipped without buffering the rest of the line; later records are still processed and the exit status indicates failure. The limit does not apply to an empty filter, which copies bytes directly.
