@@ -1,4 +1,4 @@
-use aip_filter::{parse, CompiledFilter};
+use aip_filter::{CompiledFilter, parse};
 use serde_json::Value as Json;
 use std::{
     fs::File,
@@ -41,8 +41,10 @@ fn filter_lines(
     let mut lineno = 0;
     let mut valid = true;
 
-    while (&mut reader).take(max_record_bytes as u64 + 1)
-        .read_until(b'\n', &mut line_buffer)? > 0
+    while (&mut reader)
+        .take(max_record_bytes as u64 + 1)
+        .read_until(b'\n', &mut line_buffer)?
+        > 0
     {
         lineno += 1;
         if line_buffer.len() > max_record_bytes {
@@ -93,21 +95,25 @@ fn main() {
         match arg.as_str() {
             "-p" | "--print" => print_only = true,
             "--max-record-bytes" => {
-                max_record_bytes = args.next()
+                max_record_bytes = args
+                    .next()
                     .and_then(|value| value.parse::<usize>().ok())
                     .filter(|value| *value > 0 && value.checked_add(1).is_some())
                     .unwrap_or_else(|| usage(&program));
             }
             "--" => break args.next().unwrap_or_else(|| usage(&program)),
             "-h" | "--help" => {
-                return print_info(&program, &format!(
-                    "usage: {program} {USAGE}\n\n\
+                return print_info(
+                    &program,
+                    &format!(
+                        "usage: {program} {USAGE}\n\n\
                      -p, --print           Print the parsed expression.\n\
                      --max-record-bytes N  Limit each record, including its newline (default: {DEFAULT_MAX_RECORD_BYTES}).\n\
                      -h, --help            Print help without reading input.\n\
                      -V, --version         Print the version without reading input.\n\
                      --                    End option parsing."
-                ));
+                    ),
+                );
             }
             "-V" | "--version" => {
                 return print_info(&program, concat!("aip-filter ", env!("CARGO_PKG_VERSION")));
@@ -136,18 +142,36 @@ fn main() {
             }
             return Ok(true);
         }
-        let filter = expr.as_ref().map(|expr| expr.compile()).transpose()
+        let filter = expr
+            .as_ref()
+            .map(|expr| expr.compile())
+            .transpose()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-        let mut records = RecordOutput { writer: &mut out, needs_separator: false };
+        let mut records = RecordOutput {
+            writer: &mut out,
+            needs_separator: false,
+        };
         if paths.peek().is_none() {
-            return filter_lines(filter.as_ref(), io::stdin().lock(), &mut records, "<stdin>", max_record_bytes);
+            return filter_lines(
+                filter.as_ref(),
+                io::stdin().lock(),
+                &mut records,
+                "<stdin>",
+                max_record_bytes,
+            );
         }
         let mut valid = true;
         for path in paths {
             let file = File::open(Path::new(&path))
                 .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
-            valid &= filter_lines(filter.as_ref(), BufReader::new(file), &mut records, &path, max_record_bytes)
-                .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
+            valid &= filter_lines(
+                filter.as_ref(),
+                BufReader::new(file),
+                &mut records,
+                &path,
+                max_record_bytes,
+            )
+            .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
         }
         Ok(valid)
     })();

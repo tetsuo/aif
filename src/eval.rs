@@ -182,7 +182,10 @@ fn native_number(number: &serde_json::Number) -> Option<Value<'static>> {
     } else if let Some(value) = number.as_u64() {
         Some(Value::Uint(value))
     } else {
-        number.as_f64().filter(|value| value.is_finite()).map(Value::Float)
+        number
+            .as_f64()
+            .filter(|value| value.is_finite())
+            .map(Value::Float)
     }
 }
 
@@ -261,14 +264,19 @@ impl<'a> Literal<'a> {
             Cow::Borrowed(_) => None,
             Cow::Owned(text) => Some(text),
         };
-        let word_prefix = if op == CompareOp::Has
-            && !text.starts_with('*') && !text.ends_with('*')
+        let word_prefix = if op == CompareOp::Has && !text.starts_with('*') && !text.ends_with('*')
         {
             prefix_lengths(folded.as_deref().unwrap_or(&text).as_bytes())
         } else {
             Vec::new()
         };
-        Self { text, folded, number, boolean, word_prefix }
+        Self {
+            text,
+            folded,
+            number,
+            boolean,
+            word_prefix,
+        }
     }
 
     pub(crate) fn is_presence(&self) -> bool {
@@ -284,11 +292,26 @@ pub(crate) fn eval_literal(op: CompareOp, value: &Value<'_>, literal: &Literal<'
     if op == CompareOp::Has && literal.text == "*" {
         return !value.is_zero();
     }
-    if matches!(op, CompareOp::Equals | CompareOp::NotEquals | CompareOp::Has) {
-        let element_op = if op == CompareOp::NotEquals { CompareOp::Equals } else { op };
+    if matches!(
+        op,
+        CompareOp::Equals | CompareOp::NotEquals | CompareOp::Has
+    ) {
+        let element_op = if op == CompareOp::NotEquals {
+            CompareOp::Equals
+        } else {
+            op
+        };
         let found = match value {
-            Value::List(items) => Some(items.iter().any(|item| value_matches_literal(item, literal, element_op))),
-            Value::JsonArray(items) => Some(items.iter().any(|item| value_matches_literal(&Value::from(item), literal, element_op))),
+            Value::List(items) => Some(
+                items
+                    .iter()
+                    .any(|item| value_matches_literal(item, literal, element_op)),
+            ),
+            Value::JsonArray(items) => Some(
+                items
+                    .iter()
+                    .any(|item| value_matches_literal(&Value::from(item), literal, element_op)),
+            ),
             _ => None,
         };
         if let Some(found) = found {
@@ -297,8 +320,16 @@ pub(crate) fn eval_literal(op: CompareOp, value: &Value<'_>, literal: &Literal<'
     }
     if op == CompareOp::Has {
         match value {
-            Value::Map(entries) => return entries.iter().any(|(key, _)| key.eq_ignore_ascii_case(&literal.text)),
-            Value::JsonObject(entries) => return entries.keys().any(|key| key.eq_ignore_ascii_case(&literal.text)),
+            Value::Map(entries) => {
+                return entries
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case(&literal.text));
+            }
+            Value::JsonObject(entries) => {
+                return entries
+                    .keys()
+                    .any(|key| key.eq_ignore_ascii_case(&literal.text));
+            }
             _ => {}
         }
     }
@@ -307,10 +338,18 @@ pub(crate) fn eval_literal(op: CompareOp, value: &Value<'_>, literal: &Literal<'
 
 fn value_matches_literal(value: &Value<'_>, literal: &Literal<'_>, op: CompareOp) -> bool {
     match value {
-        Value::List(items) => items.iter().any(|item| value_matches_literal(item, literal, op)),
-        Value::Map(entries) => entries.iter().any(|(_, value)| value_matches_literal(value, literal, op)),
-        Value::JsonArray(items) => items.iter().any(|value| value_matches_literal(&Value::from(value), literal, op)),
-        Value::JsonObject(entries) => entries.values().any(|value| value_matches_literal(&Value::from(value), literal, op)),
+        Value::List(items) => items
+            .iter()
+            .any(|item| value_matches_literal(item, literal, op)),
+        Value::Map(entries) => entries
+            .iter()
+            .any(|(_, value)| value_matches_literal(value, literal, op)),
+        Value::JsonArray(items) => items
+            .iter()
+            .any(|value| value_matches_literal(&Value::from(value), literal, op)),
+        Value::JsonObject(entries) => entries
+            .values()
+            .any(|value| value_matches_literal(&Value::from(value), literal, op)),
         _ => compare_literal(op, value, literal),
     }
 }
@@ -342,13 +381,15 @@ fn string_match(haystack: &str, literal: &Literal<'_>, op: CompareOp) -> bool {
     let needle = literal.text.as_ref();
     if matches!(op, CompareOp::Equals | CompareOp::Has) {
         if let Some(suffix) = needle.strip_prefix('*') {
-            return haystack.len()
+            return haystack
+                .len()
                 .checked_sub(suffix.len())
                 .and_then(|start| haystack.get(start..))
                 .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix));
         }
         if let Some(prefix) = needle.strip_suffix('*') {
-            return haystack.get(..prefix.len())
+            return haystack
+                .get(..prefix.len())
                 .is_some_and(|head| head.eq_ignore_ascii_case(prefix));
         }
     }
@@ -360,9 +401,8 @@ fn string_match(haystack: &str, literal: &Literal<'_>, op: CompareOp) -> bool {
             if needle.is_empty() {
                 return true;
             }
-            let boundary = |c: char| {
-                c.is_whitespace() || (c.is_ascii() && !c.is_ascii_alphanumeric())
-            };
+            let boundary =
+                |c: char| c.is_whitespace() || (c.is_ascii() && !c.is_ascii_alphanumeric());
             let bytes = needle.as_bytes();
             let mut matched = 0;
             for (index, byte) in haystack.bytes().enumerate() {
@@ -436,8 +476,12 @@ fn value_contains_str(val: &Value<'_>, search: &str) -> bool {
         }
         Value::List(items) => items.iter().any(|item| value_contains_str(item, search)),
         Value::Map(entries) => entries.iter().any(|(_, v)| value_contains_str(v, search)),
-        Value::JsonArray(items) => items.iter().any(|value| Value::from(value).matches_global(search)),
-        Value::JsonObject(entries) => entries.values().any(|value| Value::from(value).matches_global(search)),
+        Value::JsonArray(items) => items
+            .iter()
+            .any(|value| Value::from(value).matches_global(search)),
+        Value::JsonObject(entries) => entries
+            .values()
+            .any(|value| Value::from(value).matches_global(search)),
         Value::Null => false,
     }
 }
@@ -476,7 +520,10 @@ mod tests {
                 "score" => Some(Value::Float(self.score)),
                 "active" => Some(Value::Bool(self.active)),
                 "labels" => Some(Value::List(
-                    self.labels.iter().map(|l| Value::String(l.as_str())).collect(),
+                    self.labels
+                        .iter()
+                        .map(|l| Value::String(l.as_str()))
+                        .collect(),
                 )),
                 "name" => Some(Value::String(&self.name)),
                 _ => None,
@@ -543,7 +590,9 @@ mod tests {
 
     #[test]
     fn test_and() {
-        let expr = parse(r#"state = "open" AND priority > 3"#).unwrap().unwrap();
+        let expr = parse(r#"state = "open" AND priority > 3"#)
+            .unwrap()
+            .unwrap();
         assert!(expr.evaluate(&item()));
 
         let expr = parse(r#"state = "closed" AND priority > 3"#)
@@ -658,9 +707,7 @@ mod tests {
         impl Filterable for Outer {
             fn field(&self, name: &str) -> Option<Value<'_>> {
                 match name {
-                    "inner" => Some(Value::Map(vec![
-                        ("value", Value::Int(self.inner.value)),
-                    ])),
+                    "inner" => Some(Value::Map(vec![("value", Value::Int(self.inner.value))])),
                     _ => None,
                 }
             }

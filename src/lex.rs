@@ -5,30 +5,30 @@ use super::ast::Position;
 pub(crate) enum TokenKind {
     InvalidInput,
     Eof,
-    Wsc,                // whitespace or comment
-    Dot,                // .
-    Has,                // :
-    Or,                 // OR
-    And,                // AND
-    Not,                // NOT
-    Lparen,             // (
-    Rparen,             // )
-    Comma,              // ,
-    LessThan,           // <
-    GreaterThan,        // >
-    GreaterThanEquals,  // >=
-    LessThanEquals,     // <=
-    NotEquals,          // !=
-    MatchesRegexp,      // =~
-    NotMatchesRegexp,   // !~
-    Equals,             // =
-    Minus,              // -
-    Plus,               // +
-    Tilde,              // ~
+    Wsc,               // whitespace or comment
+    Dot,               // .
+    Has,               // :
+    Or,                // OR
+    And,               // AND
+    Not,               // NOT
+    Lparen,            // (
+    Rparen,            // )
+    Comma,             // ,
+    LessThan,          // <
+    GreaterThan,       // >
+    GreaterThanEquals, // >=
+    LessThanEquals,    // <=
+    NotEquals,         // !=
+    MatchesRegexp,     // =~
+    NotMatchesRegexp,  // !~
+    Equals,            // =
+    Minus,             // -
+    Plus,              // +
+    Tilde,             // ~
     #[allow(dead_code)]
-    Backslash,  // backslash
-    StringLit,  // quoted string
-    Text,       // unquoted text/name
+    Backslash, // backslash
+    StringLit,         // quoted string
+    Text,              // unquoted text/name
 }
 
 /// A lexical token.
@@ -67,7 +67,11 @@ impl Lexer {
         self.prev_text = false;
 
         let Some(r) = self.peek() else {
-            return Token { kind: TokenKind::Eof, pos, val: String::new() };
+            return Token {
+                kind: TokenKind::Eof,
+                pos,
+                val: String::new(),
+            };
         };
 
         self.advance();
@@ -75,7 +79,11 @@ impl Lexer {
         match r {
             _ if is_white(r) => {
                 self.skip_white();
-                Token { kind: TokenKind::Wsc, pos, val: String::new() }
+                Token {
+                    kind: TokenKind::Wsc,
+                    pos,
+                    val: String::new(),
+                }
             }
             '-' => {
                 if let Some(rn) = self.peek() {
@@ -83,39 +91,67 @@ impl Lexer {
                         self.advance();
                         self.skip_comment();
                         self.skip_white();
-                        return Token { kind: TokenKind::Wsc, pos, val: String::new() };
+                        return Token {
+                            kind: TokenKind::Wsc,
+                            pos,
+                            val: String::new(),
+                        };
                     }
                     if is_digit(rn) {
                         return self.text(r, prev_dot);
                     }
-                    if !prev_text && rn == '.'
+                    if !prev_text
+                        && rn == '.'
                         && let Some(&next_after) = self.input.get(self.cursor + 1)
-                            && is_digit(next_after) {
-                                return self.text(r, prev_dot);
-                            }
+                        && is_digit(next_after)
+                    {
+                        return self.text(r, prev_dot);
+                    }
                 }
-                Token { kind: TokenKind::Minus, pos, val: String::new() }
+                Token {
+                    kind: TokenKind::Minus,
+                    pos,
+                    val: String::new(),
+                }
             }
             '.' => {
                 if self.peek().is_none() {
                     self.prev_dot = true;
-                    return Token { kind: TokenKind::Dot, pos, val: String::new() };
+                    return Token {
+                        kind: TokenKind::Dot,
+                        pos,
+                        val: String::new(),
+                    };
                 }
                 if !prev_text
                     && let Some(rn) = self.peek()
-                        && is_digit(rn) {
-                            return self.text(r, prev_dot);
-                        }
+                    && is_digit(rn)
+                {
+                    return self.text(r, prev_dot);
+                }
                 self.prev_dot = true;
-                Token { kind: TokenKind::Dot, pos, val: String::new() }
+                Token {
+                    kind: TokenKind::Dot,
+                    pos,
+                    val: String::new(),
+                }
             }
-            ':' => Token { kind: TokenKind::Has, pos, val: String::new() },
+            ':' => Token {
+                kind: TokenKind::Has,
+                pos,
+                val: String::new(),
+            },
             'O' => {
-                if self.remaining() > 0 && self.input[self.cursor] == 'R'
+                if self.remaining() > 0
+                    && self.input[self.cursor] == 'R'
                     && (self.remaining() < 2 || is_white(self.input[self.cursor + 1]))
                 {
                     self.advance();
-                    return Token { kind: TokenKind::Or, pos, val: String::new() };
+                    return Token {
+                        kind: TokenKind::Or,
+                        pos,
+                        val: String::new(),
+                    };
                 }
                 self.text(r, prev_dot)
             }
@@ -127,7 +163,11 @@ impl Lexer {
                 {
                     self.advance();
                     self.advance();
-                    return Token { kind: TokenKind::And, pos, val: String::new() };
+                    return Token {
+                        kind: TokenKind::And,
+                        pos,
+                        val: String::new(),
+                    };
                 }
                 self.text(r, prev_dot)
             }
@@ -139,38 +179,78 @@ impl Lexer {
                 {
                     self.advance();
                     self.advance();
-                    return Token { kind: TokenKind::Not, pos, val: String::new() };
+                    return Token {
+                        kind: TokenKind::Not,
+                        pos,
+                        val: String::new(),
+                    };
                 }
                 self.text(r, prev_dot)
             }
-            '(' => Token { kind: TokenKind::Lparen, pos, val: String::new() },
-            ')' => Token { kind: TokenKind::Rparen, pos, val: String::new() },
-            ',' => Token { kind: TokenKind::Comma, pos, val: String::new() },
+            '(' => Token {
+                kind: TokenKind::Lparen,
+                pos,
+                val: String::new(),
+            },
+            ')' => Token {
+                kind: TokenKind::Rparen,
+                pos,
+                val: String::new(),
+            },
+            ',' => Token {
+                kind: TokenKind::Comma,
+                pos,
+                val: String::new(),
+            },
             '<' => {
                 if self.peek() == Some('=') {
                     self.advance();
-                    Token { kind: TokenKind::LessThanEquals, pos, val: String::new() }
+                    Token {
+                        kind: TokenKind::LessThanEquals,
+                        pos,
+                        val: String::new(),
+                    }
                 } else {
-                    Token { kind: TokenKind::LessThan, pos, val: String::new() }
+                    Token {
+                        kind: TokenKind::LessThan,
+                        pos,
+                        val: String::new(),
+                    }
                 }
             }
             '>' => {
                 if self.peek() == Some('=') {
                     self.advance();
-                    Token { kind: TokenKind::GreaterThanEquals, pos, val: String::new() }
+                    Token {
+                        kind: TokenKind::GreaterThanEquals,
+                        pos,
+                        val: String::new(),
+                    }
                 } else {
-                    Token { kind: TokenKind::GreaterThan, pos, val: String::new() }
+                    Token {
+                        kind: TokenKind::GreaterThan,
+                        pos,
+                        val: String::new(),
+                    }
                 }
             }
             '!' => {
                 if let Some(rn) = self.peek() {
                     if rn == '=' {
                         self.advance();
-                        return Token { kind: TokenKind::NotEquals, pos, val: String::new() };
+                        return Token {
+                            kind: TokenKind::NotEquals,
+                            pos,
+                            val: String::new(),
+                        };
                     }
                     if rn == '~' {
                         self.advance();
-                        return Token { kind: TokenKind::NotMatchesRegexp, pos, val: String::new() };
+                        return Token {
+                            kind: TokenKind::NotMatchesRegexp,
+                            pos,
+                            val: String::new(),
+                        };
                     }
                 }
                 // bare ! is part of a name
@@ -179,16 +259,36 @@ impl Lexer {
             '=' => {
                 if self.peek() == Some('~') {
                     self.advance();
-                    Token { kind: TokenKind::MatchesRegexp, pos, val: String::new() }
+                    Token {
+                        kind: TokenKind::MatchesRegexp,
+                        pos,
+                        val: String::new(),
+                    }
                 } else {
-                    Token { kind: TokenKind::Equals, pos, val: String::new() }
+                    Token {
+                        kind: TokenKind::Equals,
+                        pos,
+                        val: String::new(),
+                    }
                 }
             }
-            '+' => Token { kind: TokenKind::Plus, pos, val: String::new() },
-            '~' => Token { kind: TokenKind::Tilde, pos, val: String::new() },
+            '+' => Token {
+                kind: TokenKind::Plus,
+                pos,
+                val: String::new(),
+            },
+            '~' => Token {
+                kind: TokenKind::Tilde,
+                pos,
+                val: String::new(),
+            },
             '"' => self.collect_string(),
             _ if is_text_start(r) || is_digit(r) => self.text(r, prev_dot),
-            _ => Token { kind: TokenKind::InvalidInput, pos, val: String::new() },
+            _ => Token {
+                kind: TokenKind::InvalidInput,
+                pos,
+                val: String::new(),
+            },
         }
     }
 
@@ -220,7 +320,9 @@ impl Lexer {
     fn skip_white(&mut self) {
         loop {
             match self.peek() {
-                Some(r) if is_white(r) => { self.advance(); }
+                Some(r) if is_white(r) => {
+                    self.advance();
+                }
                 Some('-') => {
                     if self.input.get(self.cursor + 1) == Some(&'-') {
                         self.advance();
@@ -253,7 +355,11 @@ impl Lexer {
         if first != '\\' {
             sb.push(first);
         } else if !self.text_esc(&mut sb) {
-            return Token { kind: TokenKind::InvalidInput, pos, val: String::new() };
+            return Token {
+                kind: TokenKind::InvalidInput,
+                pos,
+                val: String::new(),
+            };
         }
 
         // Number prefix handling
@@ -283,7 +389,11 @@ impl Lexer {
             if rn == '\\' {
                 self.advance();
                 if !self.text_esc(&mut sb) {
-                    return Token { kind: TokenKind::InvalidInput, pos, val: String::new() };
+                    return Token {
+                        kind: TokenKind::InvalidInput,
+                        pos,
+                        val: String::new(),
+                    };
                 }
             } else if is_text_start(rn) || is_digit(rn) || rn == '+' || rn == '-' {
                 sb.push(rn);
@@ -291,9 +401,10 @@ impl Lexer {
             } else if rn == '!' {
                 // ! is part of a name unless followed by = or ~
                 if let Some(&next) = self.input.get(self.cursor + 1)
-                    && (next == '=' || next == '~') {
-                        break;
-                    }
+                    && (next == '=' || next == '~')
+                {
+                    break;
+                }
                 sb.push(rn);
                 self.advance();
             } else {
@@ -302,7 +413,11 @@ impl Lexer {
         }
 
         self.prev_text = true;
-        Token { kind: TokenKind::Text, pos, val: sb }
+        Token {
+            kind: TokenKind::Text,
+            pos,
+            val: sb,
+        }
     }
 
     fn text_esc(&mut self, sb: &mut String) -> bool {
@@ -328,9 +443,8 @@ impl Lexer {
                         self.advance(); // skip r
                         self.advance(); // skip n1
                         self.advance(); // skip n2
-                        let val = (d0 << 6)
-                            + ((n1 as u32 - '0' as u32) << 3)
-                            + (n2 as u32 - '0' as u32);
+                        let val =
+                            (d0 << 6) + ((n1 as u32 - '0' as u32) << 3) + (n2 as u32 - '0' as u32);
                         if let Some(c) = char::from_u32(val) {
                             sb.push(c);
                         } else {
@@ -417,21 +531,52 @@ impl Lexer {
         while let Some(r) = self.peek() {
             self.advance();
             match r {
-                '"' => return Token { kind: TokenKind::StringLit, pos: start_pos, val: sb },
+                '"' => {
+                    return Token {
+                        kind: TokenKind::StringLit,
+                        pos: start_pos,
+                        val: sb,
+                    };
+                }
                 '\\' => {
                     let Some(rn) = self.peek() else {
-                        return Token { kind: TokenKind::InvalidInput, pos: start_pos, val: String::new() };
+                        return Token {
+                            kind: TokenKind::InvalidInput,
+                            pos: start_pos,
+                            val: String::new(),
+                        };
                     };
                     if !self.handle_text_esc(rn, &mut sb) {
                         // String-only single-char escape sequences not handled by handle_text_esc
                         match rn {
-                            'a' => { self.advance(); sb.push('\x07'); }
-                            'b' => { self.advance(); sb.push('\x08'); }
-                            'f' => { self.advance(); sb.push('\x0c'); }
-                            'n' => { self.advance(); sb.push('\n'); }
-                            'r' => { self.advance(); sb.push('\r'); }
-                            't' => { self.advance(); sb.push('\t'); }
-                            'v' => { self.advance(); sb.push('\x0b'); }
+                            'a' => {
+                                self.advance();
+                                sb.push('\x07');
+                            }
+                            'b' => {
+                                self.advance();
+                                sb.push('\x08');
+                            }
+                            'f' => {
+                                self.advance();
+                                sb.push('\x0c');
+                            }
+                            'n' => {
+                                self.advance();
+                                sb.push('\n');
+                            }
+                            'r' => {
+                                self.advance();
+                                sb.push('\r');
+                            }
+                            't' => {
+                                self.advance();
+                                sb.push('\t');
+                            }
+                            'v' => {
+                                self.advance();
+                                sb.push('\x0b');
+                            }
                             // Unrecognised escape: keep the backslash
                             _ => sb.push('\\'),
                         }
@@ -441,7 +586,11 @@ impl Lexer {
             }
         }
         // Unterminated string
-        Token { kind: TokenKind::InvalidInput, pos: start_pos, val: String::new() }
+        Token {
+            kind: TokenKind::InvalidInput,
+            pos: start_pos,
+            val: String::new(),
+        }
     }
 }
 
@@ -549,5 +698,4 @@ mod tests {
         let t = lex.next_token();
         assert_eq!(t.kind, TokenKind::Equals);
     }
-
 }

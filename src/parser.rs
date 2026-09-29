@@ -33,7 +33,10 @@ impl Parser {
             if token.kind != TokenKind::Wsc {
                 count += 1;
                 if count > MAX_FILTER_TOKENS {
-                    return Err(format!("{}: filter exceeds {MAX_FILTER_TOKENS} tokens", token.pos));
+                    return Err(format!(
+                        "{}: filter exceeds {MAX_FILTER_TOKENS} tokens",
+                        token.pos
+                    ));
                 }
             }
             tokens.push(token);
@@ -52,9 +55,14 @@ impl Parser {
         self.pushed = Some(token);
     }
 
-    fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<T, String> {
+    fn nested<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
         if self.depth >= MAX_PARSE_DEPTH {
-            return Err(format!("filter exceeds parser nesting limit of {MAX_PARSE_DEPTH}"));
+            return Err(format!(
+                "filter exceeds parser nesting limit of {MAX_PARSE_DEPTH}"
+            ));
         }
         self.depth += 1;
         let result = parse(self);
@@ -86,7 +94,10 @@ pub fn parse_filter(filter: &str) -> Result<Option<Expr>, String> {
         tok = lex.next_token();
     }
     if tok.kind != TokenKind::Eof {
-        return Err(format!("{}: unexpected tokens after filter expression", tok.pos));
+        return Err(format!(
+            "{}: unexpected tokens after filter expression",
+            tok.pos
+        ));
     }
 
     expr.check_limits()?;
@@ -292,9 +303,17 @@ fn validate_regex(expr: &Expr) -> Result<(), String> {
             validate_regex(right)
         }
         Expr::Unary { expr, .. } => validate_regex(expr),
-        Expr::Name { is_string, pos, name, .. } => {
+        Expr::Name {
+            is_string,
+            pos,
+            name,
+            ..
+        } => {
             if !is_string {
-                return Err(format!("{}: regular expression is not a quoted string", pos));
+                return Err(format!(
+                    "{}: regular expression is not a quoted string",
+                    pos
+                ));
             }
             // Validate the regex syntax
             if let Err(e) = crate::compiled::compile_regex(name) {
@@ -302,13 +321,17 @@ fn validate_regex(expr: &Expr) -> Result<(), String> {
             }
             Ok(())
         }
-        Expr::Comparison { pos, .. } | Expr::Member { pos, .. } => {
-            Err(format!("{}: regular expression is not a quoted string", pos))
-        }
+        Expr::Comparison { pos, .. } | Expr::Member { pos, .. } => Err(format!(
+            "{}: regular expression is not a quoted string",
+            pos
+        )),
         Expr::Function { func, .. } => {
             // Use the function name position
             let pos = func_pos(func);
-            Err(format!("{}: regular expression is not a quoted string", pos))
+            Err(format!(
+                "{}: regular expression is not a quoted string",
+                pos
+            ))
         }
     }
 }
@@ -556,7 +579,9 @@ mod tests {
     fn test_basic_comparison() {
         let expr = parse_filter("x = 42").unwrap().unwrap();
         match expr {
-            Expr::Comparison { op, left, right, .. } => {
+            Expr::Comparison {
+                op, left, right, ..
+            } => {
                 assert_eq!(op, CompareOp::Equals);
                 match *left {
                     Expr::Name { ref name, .. } => assert_eq!(name, "x"),
@@ -575,7 +600,9 @@ mod tests {
     fn test_conjunction() {
         let expr = parse_filter("a : b c = 17").unwrap().unwrap();
         match expr {
-            Expr::Binary { op: BinaryOp::And, .. } => {}
+            Expr::Binary {
+                op: BinaryOp::And, ..
+            } => {}
             _ => panic!("expected conjunction"),
         }
     }
@@ -584,7 +611,9 @@ mod tests {
     fn test_negation() {
         let expr = parse_filter("-a < 1").unwrap().unwrap();
         match expr {
-            Expr::Unary { op: UnaryOp::Minus, .. } => {}
+            Expr::Unary {
+                op: UnaryOp::Minus, ..
+            } => {}
             _ => panic!("expected unary minus"),
         }
     }

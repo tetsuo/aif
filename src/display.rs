@@ -10,7 +10,9 @@ impl fmt::Display for Expr {
 impl Expr {
     fn print(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         match self {
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 let label = match op {
                     BinaryOp::And => "conjunction",
                     BinaryOp::Or => "disjunction",
@@ -29,13 +31,17 @@ impl Expr {
                 expr.print(f, indent + 2)
             }
 
-            Expr::Comparison { op, left, right, .. } => {
+            Expr::Comparison {
+                op, left, right, ..
+            } => {
                 writeln!(f, "{:indent$}compare {}", "", op.as_str(), indent = indent)?;
                 left.print(f, indent + 2)?;
                 right.print(f, indent + 2)
             }
 
-            Expr::Name { name, is_string, .. } => {
+            Expr::Name {
+                name, is_string, ..
+            } => {
                 if *is_string {
                     writeln!(f, "{:indent$}{:?}", "", name, indent = indent)
                 } else {

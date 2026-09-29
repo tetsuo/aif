@@ -99,10 +99,7 @@ pub enum Expr {
     },
 
     /// A function call expression: `fn(args...)`.
-    Function {
-        func: Box<Expr>,
-        args: Vec<Expr>,
-    },
+    Function { func: Box<Expr>, args: Vec<Expr> },
 }
 
 impl Expr {
