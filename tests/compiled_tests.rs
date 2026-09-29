@@ -140,6 +140,70 @@ fn regex_resources_and_manual_trees_are_bounded() {
 }
 
 #[test]
+fn phrase_matching_agrees_with_a_simple_reference() {
+    struct Text<'a>(&'a str);
+    impl Filterable for Text<'_> {
+        fn field(&self, name: &str) -> Option<Value<'_>> {
+            (name == "value").then_some(Value::String(self.0))
+        }
+    }
+    fn strings(depth: usize) -> Vec<String> {
+        let mut result = vec![String::new()];
+        let mut level = vec![String::new()];
+        for _ in 0..depth {
+            level = level
+                .iter()
+                .flat_map(|prefix| {
+                    ["a", "é", "İ", " ", "!"].map(|suffix| format!("{prefix}{suffix}"))
+                })
+                .collect();
+            result.extend(level.iter().cloned());
+        }
+        result
+    }
+    let haystacks = strings(4);
+    for needle in strings(3) {
+        let expr = parse(&format!(
+            "value:{}",
+            serde_json::to_string(&needle).unwrap()
+        ))
+        .unwrap()
+        .unwrap();
+        let filter = expr.compile().unwrap();
+        let folded_needle = needle.to_lowercase();
+        for haystack in &haystacks {
+            let folded = haystack.to_lowercase();
+            let boundary =
+                |c: char| c.is_whitespace() || (c.is_ascii() && !c.is_ascii_alphanumeric());
+            let expected = folded_needle.is_empty()
+                || folded.char_indices().any(|(start, _)| {
+                    folded[start..].starts_with(&folded_needle)
+                        && folded[..start].chars().next_back().is_none_or(boundary)
+                        && folded[start + folded_needle.len()..]
+                            .chars()
+                            .next()
+                            .is_none_or(boundary)
+                });
+            assert_eq!(
+                filter.evaluate(&Text(haystack)),
+                expected,
+                "{haystack:?} : {needle:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn long_overlapping_phrases_are_supported() {
+    let needle = "aa ".repeat(1000) + "a";
+    let expr = parse(&format!("value:\"{needle}\"")).unwrap().unwrap();
+    let filter = expr.compile().unwrap();
+    let haystack = "aa ".repeat(100_000);
+    assert!(!filter.evaluate(&json!({"value": haystack})));
+    assert!(filter.evaluate(&json!({"value": haystack + "a"})));
+}
+
+#[test]
 fn invalid_comparison_operands_report_errors() {
     let expr = parse("value:(other=1)").unwrap().unwrap();
     assert!(expr.compile().is_err());

@@ -211,7 +211,7 @@ impl<'a> Predicate<'a> {
                     negated: op == CompareOp::NotMatchesRegexp,
                 }
             }
-            _ => Self::Literal(op, Literal::new(literal_text(expr)?)),
+            _ => Self::Literal(op, Literal::new(literal_text(expr)?, op)),
         })
     }
 

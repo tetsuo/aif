@@ -233,10 +233,11 @@ pub(crate) struct Literal<'a> {
     folded: Option<String>,
     number: Option<Value<'static>>,
     boolean: Option<bool>,
+    word_prefix: Vec<usize>,
 }
 
 impl<'a> Literal<'a> {
-    pub(crate) fn new(text: Cow<'a, str>) -> Self {
+    pub(crate) fn new(text: Cow<'a, str>, op: CompareOp) -> Self {
         let number = if let Ok(value) = text.parse::<i64>() {
             Some(Value::Int(value))
         } else if let Ok(value) = text.parse::<u64>() {
@@ -255,7 +256,14 @@ impl<'a> Literal<'a> {
             Cow::Borrowed(_) => None,
             Cow::Owned(text) => Some(text),
         };
-        Self { text, folded, number, boolean }
+        let word_prefix = if op == CompareOp::Has
+            && !text.starts_with('*') && !text.ends_with('*')
+        {
+            prefix_lengths(folded.as_deref().unwrap_or(&text).as_bytes())
+        } else {
+            Vec::new()
+        };
+        Self { text, folded, number, boolean, word_prefix }
     }
 
     fn folded(&self) -> &str {
@@ -343,21 +351,47 @@ fn string_match(haystack: &str, literal: &Literal<'_>, op: CompareOp) -> bool {
             let boundary = |c: char| {
                 c.is_whitespace() || (c.is_ascii() && !c.is_ascii_alphanumeric())
             };
-            let mut offset = 0;
-            while let Some(index) = haystack[offset..].find(needle) {
-                let start = offset + index;
-                let end = start + needle.len();
-                if haystack[..start].chars().next_back().is_none_or(boundary)
-                    && haystack[end..].chars().next().is_none_or(boundary)
-                {
-                    return true;
+            let bytes = needle.as_bytes();
+            let mut matched = 0;
+            for (index, byte) in haystack.bytes().enumerate() {
+                while matched > 0 && byte != bytes[matched] {
+                    matched = literal.word_prefix[matched - 1];
                 }
-                offset = start + haystack[start..].chars().next().unwrap().len_utf8();
+                if byte == bytes[matched] {
+                    matched += 1;
+                }
+                if matched == bytes.len() {
+                    // A complete UTF-8 needle matches only at character boundaries.
+                    let end = index + 1;
+                    let start = end - bytes.len();
+                    if haystack[..start].chars().next_back().is_none_or(boundary)
+                        && haystack[end..].chars().next().is_none_or(boundary)
+                    {
+                        return true;
+                    }
+                    matched = literal.word_prefix[matched - 1];
+                }
             }
             false
         }
         _ => compare_order(op, Some(lowercase(haystack).as_ref().cmp(literal.folded()))),
     }
+}
+
+// Prefix lengths let the KMP search reuse overlapping matches in linear time.
+fn prefix_lengths(needle: &[u8]) -> Vec<usize> {
+    let mut prefix = vec![0; needle.len()];
+    for index in 1..needle.len() {
+        let mut matched = prefix[index - 1];
+        while matched > 0 && needle[index] != needle[matched] {
+            matched = prefix[matched - 1];
+        }
+        if needle[index] == needle[matched] {
+            matched += 1;
+        }
+        prefix[index] = matched;
+    }
+    prefix
 }
 
 fn lowercase(s: &str) -> Cow<'_, str> {
