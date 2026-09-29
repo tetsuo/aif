@@ -8,6 +8,7 @@ use std::{
 };
 
 const DEFAULT_MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
+const USAGE: &str = "[-p|--print] [--max-record-bytes N] [--] <expr> [file...]";
 
 struct RecordOutput<W> {
     writer: W,
@@ -70,8 +71,16 @@ fn filter_lines(
 }
 
 fn usage(program: &str) -> ! {
-    eprintln!("usage: {program} [-p|--print] [--max-record-bytes N] [--] <expr> [file...]");
+    eprintln!("usage: {program} {USAGE}");
     process::exit(2);
+}
+
+fn print_info(program: &str, message: &str) {
+    let mut out = io::stdout().lock();
+    if let Err(error) = writeln!(out, "{message}").and_then(|()| out.flush()) {
+        eprintln!("{program}: {error}");
+        process::exit(1);
+    }
 }
 
 fn main() {
@@ -90,7 +99,23 @@ fn main() {
                     .unwrap_or_else(|| usage(&program));
             }
             "--" => break args.next().unwrap_or_else(|| usage(&program)),
-            "-h" | "--help" => usage(&program),
+            "-h" | "--help" => {
+                return print_info(&program, &format!(
+                    "usage: {program} {USAGE}\n\n\
+                     -p, --print           Print the parsed expression.\n\
+                     --max-record-bytes N  Limit each record, including its newline (default: {DEFAULT_MAX_RECORD_BYTES}).\n\
+                     -h, --help            Print help without reading input.\n\
+                     -V, --version         Print the version without reading input.\n\
+                     --                    End option parsing."
+                ));
+            }
+            "-V" | "--version" => {
+                return print_info(&program, concat!("aip-filter ", env!("CARGO_PKG_VERSION")));
+            }
+            _ if arg.starts_with("--") => {
+                eprintln!("{program}: unknown option: {arg}; use -- before a literal expression");
+                usage(&program);
+            }
             _ => break arg,
         }
     };

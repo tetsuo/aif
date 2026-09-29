@@ -16,6 +16,8 @@ cargo install --path .
 usage: aip-filter [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
 ```
 
+* `--help` and `--version` print information and exit successfully without reading input.
+* Unknown long options fail. Use `--` before an expression that starts with `--`, including filter comments.
 * `--print` prints the parsed expression instead of evaluating it.
 * If no files are given, reads from stdin.
 * Input is newline-delimited JSON, with one value per line. Matching lines are preserved, with a newline inserted between records when a preceding input file has no trailing newline. A final unterminated record is otherwise left unchanged.
@@ -23,6 +25,7 @@ usage: aip-filter [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
 * Invalid JSON lines are reported and skipped. Any invalid JSON or input/output error causes a nonzero exit status.
 * Records are limited to 8 MiB by default, including the newline. `--max-record-bytes N` sets a positive byte limit. Oversized records are reported and skipped without buffering the rest of the line; later records are still processed and the exit status indicates failure. The limit does not apply to an empty filter, which copies bytes directly.
 * Memory depends on the largest allowed record and its parsed JSON values, not on the total number of records. The record limit is not a process-memory limit.
+* Exit status is 0 for successful processing, even with no matches; 1 for filter, data, or I/O errors; and 2 for invalid command-line usage.
 
 ### Matching rules
 

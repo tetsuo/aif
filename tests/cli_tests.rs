@@ -154,6 +154,43 @@ fn empty_filter_and_print_mode() {
 }
 
 #[test]
+fn information_flags_succeed_and_unknown_long_options_fail() {
+    for flag in ["--help", "-h", "--version", "-V"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+            .arg(flag)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{flag}");
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        if matches!(flag, "--help" | "-h") {
+            assert!(text.contains("usage:"));
+            assert!(text.contains("--max-record-bytes"));
+            assert!(text.contains("--version"));
+        } else {
+            assert_eq!(text, format!("aip-filter {}\n", env!("CARGO_PKG_VERSION")));
+        }
+    }
+    for flag in ["--verison", "--unknown", "--print=invalid"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+            .arg(flag)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{flag}");
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unknown option"));
+    }
+    let output = run("-- literal comment", "raw input\n", &["--"]);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"raw input\n");
+    let output = run("-p", "\"unrelated\"\n", &["--"]);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"\"unrelated\"\n");
+}
+
+#[test]
 fn invalid_json_is_reported_and_returns_failure() {
     let output = run("foobar", "not json\n{\"msg\":\"foobar\"}\n", &[]);
     assert!(!output.status.success());
@@ -305,4 +342,16 @@ fn output_flush_errors_are_reported() {
         .write_all(b"{\"msg\":\"foobar\"}\n")
         .unwrap();
     assert!(!child.wait_with_output().unwrap().status.success());
+    for flag in ["--help", "--version"] {
+        let (writer, reader) = UnixStream::pair().unwrap();
+        drop(reader);
+        let output = Command::new(env!("CARGO_BIN_EXE_aip-filter"))
+            .arg(flag)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(OwnedFd::from(writer)))
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+    }
 }
