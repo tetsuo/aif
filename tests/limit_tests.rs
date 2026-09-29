@@ -1,4 +1,4 @@
-use aif::parse;
+use aif::{parse, parser::MAX_FILTER_BYTES};
 use std::process::Command;
 
 #[test]
@@ -11,7 +11,9 @@ fn excessive_filters_report_errors_without_crashing() {
         "x ".repeat(300),
         "x.".repeat(300) + "x",
         "x AND ".repeat(300) + "x",
-        "x".repeat(65537),
+        // Three-byte UTF-8 characters keep the argument below Windows' UTF-16
+        // command-line limit while exceeding the filter byte limit.
+        "界".repeat(MAX_FILTER_BYTES / "界".len() + 1),
     ];
     for filter in filters {
         let output = Command::new(env!("CARGO_BIN_EXE_aif"))
@@ -26,6 +28,18 @@ fn excessive_filters_report_errors_without_crashing() {
         );
         assert!(output.stdout.is_empty());
         assert!(String::from_utf8_lossy(&output.stderr).contains("exceeds"));
+    }
+}
+
+#[test]
+fn filter_byte_limit_counts_utf8_bytes() {
+    for character in ["x", "界"] {
+        let within_limit = character.repeat(MAX_FILTER_BYTES / character.len());
+        assert!(parse(&within_limit).is_ok());
+        assert_eq!(
+            parse(&(within_limit + character)).unwrap_err(),
+            format!("filter exceeds {MAX_FILTER_BYTES} bytes")
+        );
     }
 }
 

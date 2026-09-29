@@ -323,14 +323,10 @@ impl Lexer {
                 Some(r) if is_white(r) => {
                     self.advance();
                 }
-                Some('-') => {
-                    if self.input.get(self.cursor + 1) == Some(&'-') {
-                        self.advance();
-                        self.advance();
-                        self.skip_comment();
-                    } else {
-                        return;
-                    }
+                Some('-') if self.input.get(self.cursor + 1) == Some(&'-') => {
+                    self.advance();
+                    self.advance();
+                    self.skip_comment();
                 }
                 _ => return,
             }
