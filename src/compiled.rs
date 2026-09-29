@@ -28,7 +28,11 @@ enum Node<'a> {
         field: Option<Source<'a>>,
         boolean_only: bool,
     },
-    Comparison(Source<'a>, Predicate<'a>),
+    Comparison {
+        source: Source<'a>,
+        predicate: Predicate<'a>,
+        op: CompareOp,
+    },
 }
 
 #[derive(Debug)]
@@ -75,10 +79,11 @@ impl<'a> Node<'a> {
             Expr::Unary { expr, .. } => Self::Not(Box::new(Self::compile(expr, regex_budget)?)),
             Expr::Comparison {
                 op, left, right, ..
-            } => Self::Comparison(
-                Source::compile(left)?,
-                Predicate::compile(*op, right, regex_budget)?,
-            ),
+            } => Self::Comparison {
+                source: Source::compile(left)?,
+                predicate: Predicate::compile(*op, right, regex_budget)?,
+                op: *op,
+            },
             Expr::Name {
                 name, is_string, ..
             } => Self::Global {
@@ -121,7 +126,14 @@ impl<'a> Node<'a> {
                 }
                 record.matches_global(text)
             }
-            Self::Comparison(source, predicate) => source
+            Self::Comparison {
+                source,
+                predicate,
+                op: CompareOp::Has,
+            } => source.evaluate_has(record, predicate),
+            Self::Comparison {
+                source, predicate, ..
+            } => source
                 .resolve(record)
                 .is_some_and(|value| predicate.evaluate(&value)),
         }
@@ -143,6 +155,30 @@ impl<'a> Source<'a> {
             }
             _ => Err("left operand must be a field or string literal".into()),
         }
+    }
+
+    fn evaluate_has<T: Filterable>(&self, record: &T, predicate: &Predicate<'_>) -> bool {
+        if let Self::Field(path) = self {
+            for length in 1..path.len() {
+                let value = if length == 1 {
+                    record
+                        .field(path[0])
+                        .or_else(|| record.field_path(&path[..length]))
+                } else {
+                    record.field_path(&path[..length])
+                };
+                if let Some(value) = value
+                    && matches!(
+                        value,
+                        Value::Map(_) | Value::JsonObject(_) | Value::List(_) | Value::JsonArray(_)
+                    )
+                {
+                    return has_path(value, &path[length..], predicate, false);
+                }
+            }
+        }
+        self.resolve(record)
+            .is_some_and(|value| predicate.evaluate(&value))
     }
 
     fn resolve<'s, T: Filterable>(&'s self, record: &'s T) -> Option<Value<'s>> {
@@ -216,19 +252,55 @@ impl<'a> Predicate<'a> {
     }
 
     fn evaluate(&self, value: &Value<'_>) -> bool {
+        self.evaluate_with_presence(value, false)
+    }
+
+    fn evaluate_with_presence(&self, value: &Value<'_>, map_entry: bool) -> bool {
         match self {
             Self::Binary(BinaryOp::And, left, right) => {
-                left.evaluate(value) && right.evaluate(value)
+                left.evaluate_with_presence(value, map_entry)
+                    && right.evaluate_with_presence(value, map_entry)
             }
             Self::Binary(BinaryOp::Or, left, right) => {
-                left.evaluate(value) || right.evaluate(value)
+                left.evaluate_with_presence(value, map_entry)
+                    || right.evaluate_with_presence(value, map_entry)
             }
-            Self::Not(expr) => !expr.evaluate(value),
+            Self::Not(expr) => !expr.evaluate_with_presence(value, map_entry),
+            Self::Literal(CompareOp::Has, literal) if map_entry && literal.is_presence() => true,
             Self::Literal(op, literal) => eval_literal(*op, value, literal),
             Self::Regex { regex, negated } => value
                 .as_str()
                 .is_some_and(|text| regex.is_match(text) != *negated),
         }
+    }
+}
+
+// Map-key presence is independent of its value; only `:` traverses repeated values.
+fn has_path(value: Value<'_>, path: &[&str], predicate: &Predicate<'_>, map_entry: bool) -> bool {
+    let Some((segment, rest)) = path.split_first() else {
+        return predicate.evaluate_with_presence(&value, map_entry);
+    };
+    match value {
+        Value::Map(entries) => entries
+            .into_iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(segment))
+            .is_some_and(|(_, value)| has_path(value, rest, predicate, true)),
+        Value::JsonObject(entries) => entries
+            .get(*segment)
+            .or_else(|| {
+                entries
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(segment))
+                    .map(|(_, value)| value)
+            })
+            .is_some_and(|value| has_path(Value::from(value), rest, predicate, true)),
+        Value::List(items) => items
+            .into_iter()
+            .any(|value| has_path(value, path, predicate, false)),
+        Value::JsonArray(items) => items
+            .iter()
+            .any(|value| has_path(Value::from(value), path, predicate, false)),
+        _ => false,
     }
 }
 

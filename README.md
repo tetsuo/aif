@@ -29,7 +29,9 @@ usage: aip-filter [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
 * Bare literals search values recursively, including nested objects and arrays, but not object keys. String searches are case-insensitive substrings.
 * An unquoted boolean field name evaluates that field. A dotted name resolves a field path first and otherwise becomes a global literal. Quote a search term to prevent field lookup, for example `'"active"'` or `'"example.com"'`.
 * String `=` and `!=` ignore ASCII case and support one leading or trailing `*`. The two operators are opposites.
-* String `:` matches words or phrases bounded by whitespace or ASCII punctuation, or a leading/trailing wildcard. Lists match any element; maps match keys. `field:*` tests for a non-default value, including a nonempty list or map.
+* String `:` matches words or phrases bounded by whitespace or ASCII punctuation, or a leading/trailing wildcard. Lists match any element; maps match keys.
+* Top-level `field:*` tests for a non-default value, including a nonempty list or map. For a map entry, `m.foo:*` tests whether the key exists, even when its value is zero, false, empty, or null. JSON objects and `Value::Map` use map semantics; custom message paths use non-default presence.
+* The `:` operator can traverse repeated values: `r.foo:42` matches if an element has a matching `foo` value. A grouped right-hand side applies to one resolved element. Ordinary comparisons do not traverse arrays, and numeric path segments are never array indices.
 * Functions can be parsed and printed, but evaluation rejects the entire filter if any function is present, including inside a negation or unused branch.
 * The CLI compiles filters before reading records. Regexes, numeric literals, and field paths are reused across records. Filters can contain at most 32 regexes; each regex has a 1 MiB compiled-size limit and a 256 KiB DFA cache limit.
 * Filters are limited to 64 KiB, 512 non-whitespace tokens, 64 recursive parser calls, and an expression tree of at most 128 levels and 512 nodes. Excessive filters return errors instead of recursing without a bound.

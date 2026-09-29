@@ -271,6 +271,10 @@ impl<'a> Literal<'a> {
         Self { text, folded, number, boolean, word_prefix }
     }
 
+    pub(crate) fn is_presence(&self) -> bool {
+        self.text == "*"
+    }
+
     fn folded(&self) -> &str {
         self.folded.as_deref().unwrap_or(&self.text)
     }

@@ -128,6 +128,9 @@ fn has_and_boolean_values() {
     matches("meta:*", r#"{"meta":{"owner":"alice"}}"#, true);
     matches("meta:*", r#"{"meta":{}}"#, false);
     matches("meta.owner=alice", r#"{"meta":{"owner":"alice"}}"#, true);
+    matches("meta.zero:*", r#"{"meta":{"zero":0}}"#, true);
+    matches("r.foo:42", r#"{"r":[{"foo":42}]}"#, true);
+    matches("r.foo:42", r#"{"r":[{"foo":0}]}"#, false);
 }
 
 #[test]
