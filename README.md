@@ -77,6 +77,8 @@ Implement `Filterable` for your type, compile the expression once with `Expr::co
 
 `Expr::evaluate` is a convenience method for one record: it compiles on every call and returns false if compilation fails. Use `Expr::compile` when errors must be reported.
 
+JSON numbers use `i64`, `u64`, or finite `f64` when representable. If another crate enables `serde_json/arbitrary_precision`, larger values are retained as `Value::JsonNumber` without panicking or converting to infinity. Numeric comparisons against an out-of-range value return false, including `!=`; presence checks and exact bare-literal matching of its JSON number text remain available. This does not provide arbitrary-precision arithmetic.
+
 Bare-literal matching also requires overriding `all_field_values` or `matches_global`; the default searches no values. Override `matches_global` to search borrowed data without building a list of values. `Value::matches_global` provides recursive matching for individual values.
 
 ```rust

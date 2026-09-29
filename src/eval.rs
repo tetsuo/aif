@@ -13,6 +13,8 @@ pub enum Value<'a> {
     Uint(u64),
     /// Floating-point number.
     Float(f64),
+    /// Borrowed JSON number, including values outside the native numeric range.
+    JsonNumber(&'a serde_json::Number),
     /// Borrowed string reference.
     String(&'a str),
     /// Owned string (for computed values).
@@ -51,6 +53,7 @@ impl<'a> Value<'a> {
             Value::Int(i) => *i == 0,
             Value::Uint(u) => *u == 0,
             Value::Float(f) => *f == 0.0,
+            Value::JsonNumber(number) => native_number(number).is_some_and(|value| value.is_zero()),
             Value::String(s) => s.is_empty(),
             Value::StringOwned(s) => s.is_empty(),
             Value::List(v) => v.is_empty(),
@@ -173,21 +176,23 @@ pub trait Filterable {
     }
 }
 
+fn native_number(number: &serde_json::Number) -> Option<Value<'static>> {
+    if let Some(value) = number.as_i64() {
+        Some(Value::Int(value))
+    } else if let Some(value) = number.as_u64() {
+        Some(Value::Uint(value))
+    } else {
+        number.as_f64().filter(|value| value.is_finite()).map(Value::Float)
+    }
+}
+
 impl<'a> From<&'a Json> for Value<'a> {
     fn from(value: &'a Json) -> Self {
         match value {
             Json::Null => Self::Null,
             Json::Bool(value) => Self::Bool(*value),
             Json::String(value) => Self::String(value),
-            Json::Number(value) => {
-                if let Some(value) = value.as_i64() {
-                    Self::Int(value)
-                } else if let Some(value) = value.as_u64() {
-                    Self::Uint(value)
-                } else {
-                    Self::Float(value.as_f64().unwrap())
-                }
-            }
+            Json::Number(value) => native_number(value).unwrap_or(Self::JsonNumber(value)),
             Json::Array(values) => Self::JsonArray(values),
             Json::Object(values) => Self::JsonObject(values),
         }
@@ -307,6 +312,9 @@ fn value_matches_literal(value: &Value<'_>, literal: &Literal<'_>, op: CompareOp
 }
 
 fn compare_literal(op: CompareOp, value: &Value<'_>, literal: &Literal<'_>) -> bool {
+    if let Value::JsonNumber(number) = value {
+        return native_number(number).is_some_and(|value| compare_literal(op, &value, literal));
+    }
     if let Some(text) = value.as_str() {
         return string_match(text, literal, op);
     }
@@ -414,6 +422,10 @@ fn value_contains_str(val: &Value<'_>, search: &str) -> bool {
         Value::Int(i) => i.to_string() == search,
         Value::Uint(u) => u.to_string() == search,
         Value::Float(f) => f.to_string() == search,
+        Value::JsonNumber(number) => match native_number(number) {
+            Some(value) => value.matches_global(search),
+            None => number.to_string() == search,
+        },
         Value::Bool(b) => {
             let bs = if *b { "true" } else { "false" };
             bs.eq_ignore_ascii_case(search)
