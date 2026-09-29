@@ -27,7 +27,7 @@ defaults:
     shell: bash
 
 env:
-  RELEASE_RUST: "1.88.0"
+  RELEASE_RUST: stable
 
 jobs:
   prepare:
@@ -54,6 +54,8 @@ jobs:
         run: rustup toolchain install "$RELEASE_RUST" --profile minimal
       - name: Select release toolchain
         run: rustup override set "$RELEASE_RUST"
+      - name: Test release automation
+        run: python3 -B -m unittest discover -s scripts -p 'test_*.py'
       - name: Prepare version and source bundle
         id: version
         env:
@@ -70,10 +72,6 @@ jobs:
           retention-days: 7
           overwrite: true
 
-  checks:
-    needs: prepare
-    uses: ./.github/workflows/ci.yml
-
   build:
     needs: prepare
     runs-on: ${{ matrix.os }}
@@ -84,10 +82,16 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
+            binary: aif
           - os: macos-15
             target: aarch64-apple-darwin
+            binary: aif
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: aif.exe
     env:
       TARGET: ${{ matrix.target }}
+      BINARY: ${{ matrix.binary }}
       VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
     steps:
@@ -118,7 +122,7 @@ jobs:
       - name: Build and check CLI
         run: |
           cargo build --release --locked --target "$TARGET"
-          binary="target/$TARGET/release/aif"
+          binary="target/$TARGET/release/$BINARY"
           test "$("$binary" --version)" = "aif $VERSION"
           printf '{"n":1}\n{"n":2}\n' | "$binary" 'n > 1' > target/smoke.jsonl
           printf '{"n":2}\n' > target/expected.jsonl
@@ -132,6 +136,7 @@ jobs:
             exit 1
           fi
       - name: Archive CLI
+        if: runner.os != 'Windows'
         run: |
           mkdir -p target/release-dist
           COPYFILE_DISABLE=1 tar -czf "target/release-dist/aif-v$VERSION-$TARGET.tar.gz" \
@@ -143,6 +148,7 @@ jobs:
           cargo test --locked --manifest-path "target/package/aif-$VERSION/Cargo.toml"
           cp "target/package/aif-$VERSION.crate" target/release-dist/
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: runner.os != 'Windows'
         with:
           name: release-assets-${{ matrix.target }}
           path: target/release-dist/*
@@ -152,7 +158,7 @@ jobs:
           overwrite: true
 
   publish:
-    needs: [prepare, checks, build]
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
