@@ -297,7 +297,7 @@ fn validate_regex(expr: &Expr) -> Result<(), String> {
                 return Err(format!("{}: regular expression is not a quoted string", pos));
             }
             // Validate the regex syntax
-            if let Err(e) = regex::Regex::new(name) {
+            if let Err(e) = crate::compiled::compile_regex(name) {
                 return Err(format!("{}: invalid regular expression: {}", pos, e));
             }
             Ok(())

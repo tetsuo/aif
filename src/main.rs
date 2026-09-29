@@ -1,4 +1,4 @@
-use aip_filter::{parse, Expr, Filterable, Value};
+use aip_filter::{parse, CompiledFilter};
 use serde_json::Value as Json;
 use std::{
     fs::File,
@@ -7,66 +7,8 @@ use std::{
     process,
 };
 
-struct JsonRecord<'j>(&'j Json);
-
-impl<'j> Filterable for JsonRecord<'j> {
-    fn field(&self, name: &str) -> Option<Value<'_>> {
-        json_to_value(self.0.get(name)?)
-    }
-
-    fn field_path(&self, path: &[&str]) -> Option<Value<'_>> {
-        let mut cur = self.0;
-        for &segment in path {
-            cur = cur.get(segment)?;
-        }
-        json_to_value(cur)
-    }
-
-    fn all_field_values(&self) -> Vec<Value<'_>> {
-        match self.0 {
-            Json::Object(map) => map.values().filter_map(json_to_value).collect(),
-            _ => json_to_value(self.0).into_iter().collect(),
-        }
-    }
-
-    fn matches_global(&self, search: &str) -> bool {
-        match self.0 {
-            Json::Object(map) => map
-                .values()
-                .any(|value| JsonRecord(value).matches_global(search)),
-            Json::Array(items) => items
-                .iter()
-                .any(|value| JsonRecord(value).matches_global(search)),
-            _ => json_to_value(self.0).is_some_and(|value| value.matches_global(search)),
-        }
-    }
-}
-
-fn json_to_value(v: &Json) -> Option<Value<'_>> {
-    match v {
-        Json::String(s)  => Some(Value::String(s.as_str())),
-        Json::Bool(b)    => Some(Value::Bool(*b)),
-        Json::Null       => Some(Value::Null),
-        Json::Number(n)  => {
-            if let Some(i) = n.as_i64() { return Some(Value::Int(i)); }
-            if let Some(u) = n.as_u64() { return Some(Value::Uint(u)); }
-            n.as_f64().map(Value::Float)
-        }
-        Json::Array(arr) => Some(Value::List(
-            arr.iter().filter_map(json_to_value).collect(),
-        )),
-        Json::Object(map) => Some(Value::Map(
-            map.iter()
-                .filter_map(|(key, value)| {
-                    json_to_value(value).map(|value| (key.as_str(), value))
-                })
-                .collect(),
-        )),
-    }
-}
-
 fn filter_lines(
-    expr: Option<&Expr>,
+    expr: Option<&CompiledFilter<'_>>,
     mut reader: impl BufRead,
     out: &mut impl Write,
     source: &str,
@@ -86,7 +28,7 @@ fn filter_lines(
         if !line_buffer.trim().is_empty() {
             match serde_json::from_str::<Json>(&line_buffer) {
                 Ok(json) => {
-                    if expr.evaluate(&JsonRecord(&json)) {
+                    if expr.evaluate(&json) {
                         // Write directly to stdout
                         out.write_all(line_buffer.as_bytes())?;
                     }
@@ -144,14 +86,16 @@ fn main() {
             }
             return Ok(true);
         }
+        let filter = expr.as_ref().map(|expr| expr.compile()).transpose()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         if args.is_empty() {
-            return filter_lines(expr.as_ref(), io::stdin().lock(), &mut out, "<stdin>");
+            return filter_lines(filter.as_ref(), io::stdin().lock(), &mut out, "<stdin>");
         }
         let mut valid = true;
         for path in &args {
             let file = File::open(Path::new(path))
                 .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
-            valid &= filter_lines(expr.as_ref(), BufReader::new(file), &mut out, path)
+            valid &= filter_lines(filter.as_ref(), BufReader::new(file), &mut out, path)
                 .map_err(|e| io::Error::new(e.kind(), format!("{path}: {e}")))?;
         }
         Ok(valid)

@@ -41,12 +41,14 @@
 //! ```
 
 pub mod ast;
+mod compiled;
 pub mod display;
 pub mod eval;
 pub mod lex;
 pub mod parser;
 
 pub use ast::{BinaryOp, CompareOp, Expr, Position, UnaryOp};
+pub use compiled::CompiledFilter;
 pub use eval::{Filterable, Value};
 
 /// Parse a filter expression string into an [`Expr`] AST.
