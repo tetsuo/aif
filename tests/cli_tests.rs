@@ -139,7 +139,11 @@ fn empty_filter_and_print_mode() {
     let output = run("", input, &[]);
     assert!(output.status.success());
     assert_eq!(output.stdout, input.as_bytes());
-    let output = run("", input, &["--print"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+        .args(["--print", ""])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 
