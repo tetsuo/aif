@@ -1,0 +1,228 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version impact (the first release is 0.1.0 or X.0.0)
+        required: true
+        default: patch
+        type: choice
+        options: [minor, patch]
+      dry_run:
+        description: Build and test artifacts without pushing or publishing
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_RUST: "1.88.0"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      commit: ${{ steps.version.outputs.commit }}
+      base: ${{ steps.version.outputs.base }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a release branch
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
+        run: |
+          test "$REF_TYPE" = branch
+          python3 -B -c 'import sys; sys.path.insert(0, "scripts"); from release import branch_major; branch_major(sys.argv[1])' "$RELEASE_BRANCH"
+      - name: Install Rust
+        run: rustup toolchain install "$RELEASE_RUST" --profile minimal
+      - name: Select release toolchain
+        run: rustup override set "$RELEASE_RUST"
+      - name: Prepare version and source bundle
+        id: version
+        env:
+          RELEASE_BRANCH: ${{ github.ref_name }}
+          IMPACT: ${{ inputs.version }}
+        run: |
+          python3 -B scripts/release.py prepare --branch "$RELEASE_BRANCH" --impact "$IMPACT" \
+            --bundle target/release-source.bundle --output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-source
+          path: target/release-source.bundle
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  checks:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - os: macos-15
+            target: aarch64-apple-darwin
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-source
+          path: target/release-input
+      - name: Check out versioned source
+        run: |
+          git fetch target/release-input/release-source.bundle HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_COMMIT"
+          git checkout --detach "$RELEASE_COMMIT"
+      - name: Install Rust
+        run: rustup toolchain install "$RELEASE_RUST" --profile minimal --target "$TARGET"
+      - name: Select release toolchain
+        run: rustup override set "$RELEASE_RUST"
+      - name: Set macOS deployment target
+        if: runner.os == 'macOS'
+        run: echo 'MACOSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
+      - name: Test release target
+        run: |
+          cargo test --locked --target "$TARGET"
+          cargo test --locked --target "$TARGET" --features serde_json/arbitrary_precision
+          cargo test --release --locked --target "$TARGET"
+      - name: Build and check CLI
+        run: |
+          cargo build --release --locked --target "$TARGET"
+          binary="target/$TARGET/release/aip-filter"
+          test "$("$binary" --version)" = "aip-filter $VERSION"
+          printf '{"n":1}\n{"n":2}\n' | "$binary" 'n > 1' > target/smoke.jsonl
+          printf '{"n":2}\n' > target/expected.jsonl
+          cmp target/expected.jsonl target/smoke.jsonl
+      - name: Verify static Linux executable
+        if: runner.os == 'Linux'
+        run: |
+          readelf -l "target/$TARGET/release/aip-filter" > target/elf-headers
+          if grep -q INTERP target/elf-headers; then
+            echo 'The Linux executable requires a dynamic loader.' >&2
+            exit 1
+          fi
+      - name: Archive CLI
+        run: |
+          mkdir -p target/release-dist
+          COPYFILE_DISABLE=1 tar -czf "target/release-dist/aip-filter-v$VERSION-$TARGET.tar.gz" \
+            -C "target/$TARGET/release" aip-filter -C "$GITHUB_WORKSPACE" LICENSE README.md
+      - name: Verify library package
+        if: runner.os == 'Linux'
+        run: |
+          cargo package --locked
+          cargo test --locked --manifest-path "target/package/aip_filter-$VERSION/Cargo.toml"
+          cp "target/package/aip_filter-$VERSION.crate" target/release-dist/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-assets-${{ matrix.target }}
+          path: target/release-dist/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  publish:
+    needs: [prepare, checks, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      RELEASE_BRANCH: ${{ github.ref_name }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      BASE: ${{ needs.prepare.outputs.base }}
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-source
+          path: target/release-input
+      - name: Check out tested source
+        run: |
+          git fetch target/release-input/release-source.bundle HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_COMMIT"
+          git checkout --detach "$RELEASE_COMMIT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
+          path: target/release-dist
+      - name: Verify asset set and generate checksums
+        run: |
+          test -f "target/release-dist/aip-filter-v$VERSION-x86_64-unknown-linux-musl.tar.gz"
+          test -f "target/release-dist/aip-filter-v$VERSION-aarch64-apple-darwin.tar.gz"
+          test -f "target/release-dist/aip_filter-$VERSION.crate"
+          test "$(find target/release-dist -maxdepth 1 -type f | wc -l)" -eq 3
+          cd target/release-dist
+          sha256sum *.tar.gz *.crate > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-downloads
+          path: target/release-dist/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+      - name: Push tested release references
+        if: ${{ !inputs.dry_run }}
+        run: |
+          python3 -B scripts/release.py push --branch "$RELEASE_BRANCH" \
+            --version "$VERSION" --base "$BASE" --commit "$RELEASE_COMMIT"
+      - name: Publish GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft'); then
+            if test "$draft" != true; then
+              echo 'The release is already public; refusing to replace its assets.' >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --generate-notes --title "$TAG" --target "$RELEASE_COMMIT"
+          fi
+          gh release upload "$TAG" target/release-dist/* --clobber
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false -f make_latest=legacy > /dev/null
+      - name: Record result
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          printf 'Version: `%s`\n\nCommit: `%s`\n\nDry run: `%s`\n\nDownload the `release-downloads` artifact for the CLI archives, Cargo source package, and SHA256SUMS.\n' \
+            "$TAG" "$RELEASE_COMMIT" "$DRY_RUN" >> "$GITHUB_STEP_SUMMARY"

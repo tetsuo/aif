@@ -4,6 +4,7 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -40,6 +41,8 @@ jobs:
           persist-credentials: false
       - name: Install Rust tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Test release automation
+        run: python3 -B -m unittest discover -s scripts -p 'test_*.py'
       - name: Check formatting
         run: cargo +stable fmt --all -- --check
       - name: Check lints
