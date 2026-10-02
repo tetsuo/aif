@@ -6,7 +6,7 @@ fn run(expr: &str, input: &str, args: &[&str]) -> Output {
 }
 
 fn run_bytes(expr: &str, input: &[u8], args: &[&str]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ele"))
         .args(args)
         .arg(expr)
         .stdin(Stdio::piped())
@@ -139,7 +139,7 @@ fn empty_filter_and_print_mode() {
     let output = run("", input, &[]);
     assert!(output.status.success());
     assert_eq!(output.stdout, input.as_bytes());
-    let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ele"))
         .args(["--print", ""])
         .stdin(Stdio::null())
         .output()
@@ -148,7 +148,7 @@ fn empty_filter_and_print_mode() {
     assert!(output.stdout.is_empty());
 
     let path = format!("{}/README.md", env!("CARGO_MANIFEST_DIR"));
-    let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ele"))
         .args(["", &path])
         .stdin(Stdio::null())
         .output()
@@ -160,7 +160,7 @@ fn empty_filter_and_print_mode() {
 #[test]
 fn information_flags_succeed_and_unknown_long_options_fail() {
     for flag in ["--help", "-h", "--version", "-V"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ele"))
             .arg(flag)
             .stdin(Stdio::null())
             .output()
@@ -173,11 +173,11 @@ fn information_flags_succeed_and_unknown_long_options_fail() {
             assert!(text.contains("--max-record-bytes"));
             assert!(text.contains("--version"));
         } else {
-            assert_eq!(text, format!("aif {}\n", env!("CARGO_PKG_VERSION")));
+            assert_eq!(text, format!("ele {}\n", env!("CARGO_PKG_VERSION")));
         }
     }
     for flag in ["--verison", "--unknown", "--print=invalid"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ele"))
             .arg(flag)
             .stdin(Stdio::null())
             .output()
@@ -271,7 +271,7 @@ fn filtering_multiple_files_preserves_successful_output() {
     let second = dir.join("second.jsonl");
     std::fs::write(&first, b"\"match first\"\n").unwrap();
     std::fs::write(&second, b"invalid\n\"match second\"\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ele"))
         .arg("match")
         .arg(&first)
         .arg(&second)
@@ -296,7 +296,7 @@ fn multiple_files_keep_record_boundaries_without_forcing_a_final_newline() {
     for ending in ["", "\n", "\r\n"] {
         std::fs::write(&first, format!("\"match first\"{ending}")).unwrap();
         std::fs::write(&last, b"\"match last\"").unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ele"))
             .arg("match")
             .args([&first, &middle, &last])
             .output()
@@ -315,7 +315,7 @@ fn multiple_files_keep_record_boundaries_without_forcing_a_final_newline() {
     }
     std::fs::write(&first, b"raw").unwrap();
     std::fs::write(&last, b"bytes").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ele"))
         .arg("")
         .args([&first, &last])
         .output()
@@ -332,7 +332,7 @@ fn output_flush_errors_are_reported() {
     use std::os::unix::net::UnixStream;
     let (writer, reader) = UnixStream::pair().unwrap();
     drop(reader);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ele"))
         .arg("foobar")
         .stdin(Stdio::piped())
         .stdout(Stdio::from(OwnedFd::from(writer)))
@@ -349,7 +349,7 @@ fn output_flush_errors_are_reported() {
     for flag in ["--help", "--version"] {
         let (writer, reader) = UnixStream::pair().unwrap();
         drop(reader);
-        let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ele"))
             .arg(flag)
             .stdin(Stdio::null())
             .stdout(Stdio::from(OwnedFd::from(writer)))

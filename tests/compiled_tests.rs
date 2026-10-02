@@ -1,4 +1,4 @@
-use aif::{Expr, Filterable, Value, parse};
+use ele::{Expr, Filterable, Value, parse};
 use serde_json::json;
 use std::process::{Command, Stdio};
 
@@ -21,7 +21,7 @@ fn unsupported_functions_reject_the_entire_filter() {
                 .contains("function calls are not supported")
         );
         assert!(!expr.evaluate(&record), "{input}");
-        let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ele"))
             .arg(input)
             .stdin(Stdio::null())
             .output()
@@ -32,7 +32,7 @@ fn unsupported_functions_reject_the_entire_filter() {
             String::from_utf8_lossy(&output.stderr).contains("function calls are not supported")
         );
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_aif"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ele"))
         .args(["--print", "fn(x)"])
         .output()
         .unwrap();
@@ -131,9 +131,9 @@ fn regex_resources_and_manual_trees_are_bounded() {
     let mut expr = parse("value").unwrap().unwrap();
     for _ in 0..150 {
         expr = Expr::Unary {
-            op: aif::UnaryOp::Not,
+            op: ele::UnaryOp::Not,
             expr: Box::new(expr),
-            pos: aif::Position { line: 1, col: 1 },
+            pos: ele::Position { line: 1, col: 1 },
         };
     }
     assert!(expr.compile().unwrap_err().contains("expression limit"));

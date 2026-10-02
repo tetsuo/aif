@@ -82,13 +82,13 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            binary: aif
+            binary: ele
           - os: macos-15
             target: aarch64-apple-darwin
-            binary: aif
+            binary: ele
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: aif.exe
+            binary: ele.exe
     env:
       TARGET: ${{ matrix.target }}
       BINARY: ${{ matrix.binary }}
@@ -123,14 +123,14 @@ jobs:
         run: |
           cargo build --release --locked --target "$TARGET"
           binary="target/$TARGET/release/$BINARY"
-          test "$("$binary" --version)" = "aif $VERSION"
+          test "$("$binary" --version)" = "ele $VERSION"
           printf '{"n":1}\n{"n":2}\n' | "$binary" 'n > 1' > target/smoke.jsonl
           printf '{"n":2}\n' > target/expected.jsonl
           cmp target/expected.jsonl target/smoke.jsonl
       - name: Verify static Linux executable
         if: runner.os == 'Linux'
         run: |
-          readelf -l "target/$TARGET/release/aif" > target/elf-headers
+          readelf -l "target/$TARGET/release/ele" > target/elf-headers
           if grep -q INTERP target/elf-headers; then
             echo 'The Linux executable requires a dynamic loader.' >&2
             exit 1
@@ -139,20 +139,20 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p target/release-dist
-          COPYFILE_DISABLE=1 tar -czf "target/release-dist/aif-v$VERSION-$TARGET.tar.gz" \
-            -C "target/$TARGET/release" aif -C "$GITHUB_WORKSPACE" LICENSE README.md
+          COPYFILE_DISABLE=1 tar -czf "target/release-dist/ele-v$VERSION-$TARGET.tar.gz" \
+            -C "target/$TARGET/release" ele -C "$GITHUB_WORKSPACE" LICENSE README.md
       - name: Archive Windows CLI
         if: runner.os == 'Windows'
         run: |
           mkdir -p target/release-dist
-          python -m zipfile -c "target/release-dist/aif-v$VERSION-$TARGET.zip" \
+          python -m zipfile -c "target/release-dist/ele-v$VERSION-$TARGET.zip" \
             "target/$TARGET/release/$BINARY" LICENSE README.md
       - name: Verify library package
         if: runner.os == 'Linux'
         run: |
           cargo package --locked
-          cargo test --locked --manifest-path "target/package/aif-$VERSION/Cargo.toml"
-          cp "target/package/aif-$VERSION.crate" target/release-dist/
+          cargo test --locked --manifest-path "target/package/ele-$VERSION/Cargo.toml"
+          cp "target/package/ele-$VERSION.crate" target/release-dist/
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-assets-${{ matrix.target }}
@@ -194,10 +194,10 @@ jobs:
           path: target/release-dist
       - name: Verify asset set and generate checksums
         run: |
-          test -f "target/release-dist/aif-v$VERSION-x86_64-unknown-linux-musl.tar.gz"
-          test -f "target/release-dist/aif-v$VERSION-aarch64-apple-darwin.tar.gz"
-          test -f "target/release-dist/aif-v$VERSION-x86_64-pc-windows-msvc.zip"
-          test -f "target/release-dist/aif-$VERSION.crate"
+          test -f "target/release-dist/ele-v$VERSION-x86_64-unknown-linux-musl.tar.gz"
+          test -f "target/release-dist/ele-v$VERSION-aarch64-apple-darwin.tar.gz"
+          test -f "target/release-dist/ele-v$VERSION-x86_64-pc-windows-msvc.zip"
+          test -f "target/release-dist/ele-$VERSION.crate"
           test "$(find target/release-dist -maxdepth 1 -type f | wc -l)" -eq 4
           cd target/release-dist
           sha256sum *.tar.gz *.zip *.crate > SHA256SUMS

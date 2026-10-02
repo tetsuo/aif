@@ -1,4 +1,4 @@
-# aif
+# ele
 
 Parses and evaluates an [AIP-160](https://google.aip.dev/160)-style filter language for JSON and Rust values.
 
@@ -16,15 +16,15 @@ cargo +stable install --path . --locked
 The CLI reads one JSON value per line from files or standard input and prints matching records without reformatting.
 
 ```text
-aif [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
+ele [-p|--print] [--max-record-bytes N] [--] <expr> [file...]
 ```
 
 ```bash
-echo '{"price":93,"status":"active"}' | aif 'price > 10 AND status = active'
+echo '{"price":93,"status":"active"}' | ele 'price > 10 AND status = active'
 
-aif '"timeout"' events.jsonl
-aif 'tags:beta' events.jsonl
-aif 'user.settings.theme = dark' events.jsonl
+ele '"timeout"' events.jsonl
+ele 'tags:beta' events.jsonl
+ele 'user.settings.theme = dark' events.jsonl
 ```
 
 * `--print` prints the parsed expression instead of filtering input.
@@ -50,7 +50,7 @@ Function calls are not supported during evaluation.
 Compile an expression once and reuse the filter. `serde_json::Value` is supported directly; implement `Filterable` for other types.
 
 ```rust
-use aif::parse;
+use ele::parse;
 use serde_json::json;
 
 let expr = parse("state = open AND priority > 3").unwrap().unwrap();
@@ -63,7 +63,7 @@ assert!(filter.evaluate(&record));
 For a custom type, expose its fields through `Filterable`:
 
 ```rust
-use aif::{Filterable, Value, parse};
+use ele::{Filterable, Value, parse};
 
 struct Issue {
     state: String,

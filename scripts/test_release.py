@@ -48,7 +48,7 @@ class RepositoryTests(unittest.TestCase):
         release.run("git", "config", "commit.gpgsign", "false")
         Path(".gitignore").write_text("target/\n")
         Path("Cargo.toml").write_text(
-            '[package]\nname = "aif"\nversion = "0.1.0"\nedition = "2024"\n'
+            '[package]\nname = "ele"\nversion = "0.1.0"\nedition = "2024"\n'
         )
         Path("src").mkdir()
         Path("src/lib.rs").write_text("pub fn example() {}\n")

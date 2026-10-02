@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aif"
+name = "ele"
 version = "0.1.0"
 dependencies = [
  "regex",
