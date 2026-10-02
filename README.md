@@ -4,7 +4,9 @@ Parses and evaluates an [AIP-160](https://google.aip.dev/160)-style filter langu
 
 ## Install
 
-Install [Rust](https://rustup.rs/), then run this from a repository checkout:
+Download the version for your operating system from the [releases page](https://github.com/tetsuo/ele/releases).
+
+To install from source, install [Rust](https://rustup.rs/), then run these commands from a repository checkout:
 
 ```bash
 rustup update stable
